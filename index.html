@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice Hub</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --primary: #4f46e5;
+    --primary-light: #eef2ff;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-700: #374151;
+    --gray-900: #111827;
+    --sidebar-w: 220px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--gray-50); color: var(--gray-900); display: flex; height: 100vh; overflow: hidden; }
+
+  /* SIDEBAR */
+  #sidebar { width: var(--sidebar-w); background: #1e1b4b; color: #c7d2fe; display: flex; flex-direction: column; flex-shrink: 0; }
+  #sidebar .logo { padding: 20px 16px; font-size: 1.2rem; font-weight: 700; color: #fff; border-bottom: 1px solid #312e81; display: flex; align-items: center; gap: 8px; }
+  #sidebar .logo span { font-size: 1.4rem; }
+  #sidebar nav { flex: 1; padding: 12px 0; }
+  #sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; font-size: 0.875rem; color: #a5b4fc; transition: background .15s; border-left: 3px solid transparent; }
+  #sidebar nav a:hover { background: #312e81; color: #fff; }
+  #sidebar nav a.active { background: #312e81; color: #fff; border-left-color: #818cf8; }
+  #sidebar nav a .icon { font-size: 1.1rem; width: 20px; text-align: center; }
+  #sidebar .footer { padding: 16px; font-size: 0.75rem; color: #6366f1; border-top: 1px solid #312e81; }
+
+  /* MAIN */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #topbar { background: #fff; border-bottom: 1px solid var(--gray-200); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #topbar h1 { font-size: 1.1rem; font-weight: 600; }
+  #topbar .actions { display: flex; gap: 8px; }
+  #content { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* CARDS / KPI */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .kpi-card { background: #fff; border-radius: 10px; padding: 20px; border: 1px solid var(--gray-200); }
+  .kpi-card .label { font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .kpi-card .value { font-size: 1.75rem; font-weight: 700; }
+  .kpi-card .sub { font-size: 0.75rem; color: var(--gray-400); margin-top: 4px; }
+  .kpi-card.green .value { color: var(--success); }
+  .kpi-card.amber .value { color: var(--warning); }
+  .kpi-card.red .value { color: var(--danger); }
+  .kpi-card.indigo .value { color: var(--primary); }
+
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .chart-card { background: #fff; border-radius: 10px; padding: 20px; border: 1px solid var(--gray-200); }
+  .chart-card h3 { font-size: 0.875rem; font-weight: 600; margin-bottom: 16px; color: var(--gray-700); }
+  .chart-wrap { position: relative; height: 200px; }
+
+  /* TABLE */
+  .table-card { background: #fff; border-radius: 10px; border: 1px solid var(--gray-200); overflow: hidden; }
+  .table-toolbar { padding: 14px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--gray-200); flex-wrap: wrap; }
+  .table-toolbar input, .table-toolbar select { border: 1px solid var(--gray-300); border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; background: #fff; outline: none; }
+  .table-toolbar input:focus, .table-toolbar select:focus { border-color: var(--primary); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead tr { background: var(--gray-50); }
+  th { padding: 10px 14px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--gray-500); border-bottom: 1px solid var(--gray-200); white-space: nowrap; }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
+  tr:hover td { background: var(--gray-50); }
+  tr:last-child td { border-bottom: none; }
+  .no-data { text-align: center; color: var(--gray-400); padding: 40px; font-size: 0.875rem; }
+  .pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--gray-200); font-size: 0.8rem; color: var(--gray-500); }
+  .pagination button { border: 1px solid var(--gray-300); background: #fff; padding: 4px 10px; border-radius: 5px; cursor: pointer; font-size: 0.8rem; }
+  .pagination button:disabled { opacity: .4; cursor: default; }
+
+  /* BUTTONS */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 7px; font-size: 0.82rem; font-weight: 500; cursor: pointer; border: none; transition: opacity .15s; }
+  .btn:hover { opacity: .85; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-secondary { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-success { background: var(--success); color: #fff; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+
+  /* BADGES */
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .badge-paid { background: #d1fae5; color: #065f46; }
+  .badge-unpaid { background: #fef3c7; color: #92400e; }
+  .badge-sent { background: #dbeafe; color: #1e40af; }
+  .badge-overdue { background: #fee2e2; color: #991b1b; }
+  .badge-draft { background: var(--gray-100); color: var(--gray-700); }
+  .badge-cancelled { background: var(--gray-200); color: var(--gray-500); }
+
+  /* COLOR DOT */
+  .color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  /* MODAL */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal { background: #fff; border-radius: 12px; width: 100%; max-width: 680px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+  .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--gray-200); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: #fff; z-index: 1; }
+  .modal-header h2 { font-size: 1rem; font-weight: 600; }
+  .modal-body { padding: 24px; }
+  .modal-footer { padding: 16px 24px; border-top: 1px solid var(--gray-200); display: flex; gap: 10px; justify-content: flex-end; background: var(--gray-50); border-radius: 0 0 12px 12px; }
+  .close-btn { background: none; border: none; font-size: 1.3rem; cursor: pointer; color: var(--gray-400); line-height: 1; padding: 2px; }
+
+  /* FORM */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label { font-size: 0.78rem; font-weight: 500; color: var(--gray-700); }
+  input[type=text], input[type=date], input[type=number], input[type=email], select, textarea {
+    border: 1px solid var(--gray-300); border-radius: 7px; padding: 8px 10px; font-size: 0.82rem; width: 100%; outline: none; background: #fff; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+  textarea { resize: vertical; min-height: 72px; }
+  input[type=color] { height: 36px; padding: 2px 4px; cursor: pointer; border-radius: 7px; }
+  .section-title { font-size: 0.75rem; font-weight: 700; color: var(--gray-500); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--gray-200); }
+
+  /* PRICING TABLE IN MODAL */
+  .pricing-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .pricing-table th { padding: 7px 10px; text-align: left; font-size: 0.72rem; text-transform: uppercase; color: var(--gray-500); background: var(--gray-50); border: 1px solid var(--gray-200); }
+  .pricing-table td { padding: 7px 10px; border: 1px solid var(--gray-200); }
+  .pricing-table tfoot td { font-weight: 700; background: var(--gray-50); }
+  .pricing-table input[type=number] { border: none; padding: 4px; font-size: 0.82rem; width: 120px; }
+  .pricing-table input[type=number]:focus { outline: 2px solid var(--primary); border-radius: 4px; }
+
+  /* INVOICE GENERATOR */
+  .gen-project-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 280px; overflow-y: auto; }
+  .gen-project-card { border: 2px solid var(--gray-200); border-radius: 8px; padding: 12px; cursor: pointer; transition: all .15s; position: relative; }
+  .gen-project-card:hover { border-color: var(--primary); background: var(--primary-light); }
+  .gen-project-card.selected { border-color: var(--primary); background: var(--primary-light); }
+  .gen-project-card input[type=radio] { position: absolute; top: 10px; right: 10px; accent-color: var(--primary); width: 16px; height: 16px; }
+  .gen-project-card .proj-name { font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .gen-project-card .proj-meta { font-size: 0.75rem; color: var(--gray-500); }
+
+  .service-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .service-check { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--gray-200); border-radius: 7px; padding: 8px 12px; font-size: 0.82rem; }
+  .service-check label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
+  .service-check input[type=checkbox] { accent-color: var(--primary); width: 15px; height: 15px; }
+  .service-check .svc-amount { font-weight: 600; color: var(--gray-700); white-space: nowrap; }
+  .invoice-total-bar { background: var(--primary-light); border: 1px solid #c7d2fe; border-radius: 8px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .invoice-total-bar .total-label { font-size: 0.875rem; color: var(--primary); font-weight: 600; }
+  .invoice-total-bar .total-amount { font-size: 1.4rem; font-weight: 700; color: var(--primary); }
+
+  /* PDF INVOICE STYLES (print/export) */
+  #pdf-invoice { display: none; }
+  @media print {
+    body > * { display: none !important; }
+    #pdf-invoice { display: block !important; }
+  }
+
+  /* REPORTS DATE RANGE */
+  .date-range { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+  .date-range span { color: var(--gray-400); }
+
+  /* TOAST */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: #1e1b4b; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 0.82rem; z-index: 9999; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div class="logo"><span>💼</span> Invoice Hub</div>
+  <nav>
+    <a class="active" data-view="dashboard"><span class="icon">📊</span> Dashboard</a>
+    <a data-view="invoices"><span class="icon">🧾</span> Invoices</a>
+    <a data-view="projects"><span class="icon">📁</span> Projects</a>
+    <a data-view="reports"><span class="icon">📈</span> Reports</a>
+    <a data-view="help"><span class="icon">❓</span> Help & Guide</a>
+  </nav>
+  <div class="footer">Fountayn · Invoice Hub</div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="topbar">
+    <h1 id="view-title">Dashboard</h1>
+    <div class="actions" id="topbar-actions"></div>
+  </div>
+  <div id="content"></div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- PDF INVOICE (hidden, used for print) -->
+<div id="pdf-invoice"></div>
+
+<script>
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
+const SB_URL = 'https://qlzoyqhsvqtxjvppvymj.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsem95cWhzdnF0eGp2cHB2eW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzODcyNTIsImV4cCI6MjA2Mzk2MzI1Mn0.4jHtMXFMWqZBXhuiyuYqmHCMDdIWF3m80eDvhRrMC44';
+const sb = supabase.createClient(SB_URL, SB_KEY);
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let invoices = [], projects = [], lineItems = [];
+let currentView = 'dashboard';
+let charts = {};
+
+// Invoice filters
+let invSearch='', invStatus='', invProject='', invDateFrom='', invDateTo='';
+let invPage = 1; const PAGE_SIZE = 20;
+
+// Report filters
+let repSearch='', repStatus='', repProject='', repDateFrom='', repDateTo='';
+let repPage = 1;
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const fmt = (n) => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '—';
+const fmtNum = (n) => n == null ? 0 : Number(n);
+
+function toast(msg, ms=2800) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function statusBadge(s) {
+  return `<span class="badge badge-${s||'draft'}">${s||'draft'}</span>`;
+}
+
+function generateInvoiceNumber() {
+  const y = new Date().getFullYear();
+  const m = String(new Date().getMonth()+1).padStart(2,'0');
+  const existing = invoices.filter(i => i.invoice_number && i.invoice_number.startsWith(`INV-${y}${m}`));
+  const seq = String(existing.length + 1).padStart(3,'0');
+  return `INV-${y}${m}-${seq}`;
+}
+
+function projectName(id) {
+  const p = projects.find(x => x.id === id);
+  return p ? p.name : '—';
+}
+
+// ── DATA LOADING ──────────────────────────────────────────────────────────────
+async function loadAll() {
+  const [pRes, iRes, lRes] = await Promise.all([
+    sb.from('inv_projects').select('*').order('created_at', {ascending:false}),
+    sb.from('inv_invoices').select('*').order('date_invoiced', {ascending:false}),
+    sb.from('inv_line_items').select('*'),
+  ]);
+  projects = pRes.data || [];
+  invoices = iRes.data || [];
+  lineItems = lRes.data || [];
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────────────────────
+document.getElementById('sidebar').addEventListener('click', e => {
+  const a = e.target.closest('a[data-view]');
+  if (!a) return;
+  document.querySelectorAll('#sidebar nav a').forEach(x => x.classList.remove('active'));
+  a.classList.add('active');
+  currentView = a.dataset.view;
+  renderView();
+});
+
+async function renderView() {
+  await loadAll();
+  const titles = {dashboard:'Dashboard', invoices:'Invoices', projects:'Projects', reports:'Reports', help:'Help & Guide'};
+  document.getElementById('view-title').textContent = titles[currentView] || '';
+  const acts = document.getElementById('topbar-actions');
+  acts.innerHTML = '';
+
+  const c = document.getElementById('content');
+  if (currentView === 'dashboard') { renderDashboard(c); }
+  else if (currentView === 'invoices') { renderInvoices(c, acts); }
+  else if (currentView === 'projects') { renderProjects(c, acts); }
+  else if (currentView === 'reports') { renderReports(c, acts); }
+  else if (currentView === 'help') { renderHelp(c); }
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function renderDashboard(c) {
+  const totalInvoiced = invoices.reduce((s,i) => s + fmtNum(i.invoice_amount), 0);
+  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s,i) => s + fmtNum(i.invoice_amount), 0);
+  const outstanding = invoices.filter(i => !['paid','cancelled'].includes(i.status)).reduce((s,i) => s + fmtNum(i.invoice_amount), 0);
+  const overdue = invoices.filter(i => {
+    if (i.status === 'paid' || i.status === 'cancelled') return false;
+    if (!i.date_invoiced) return false;
+    const due = new Date(i.date_invoiced); due.setDate(due.getDate() + 30);
+    return due < new Date();
+  }).length;
+
+  // Upcoming payments (invoices sent but unpaid, sorted by date)
+  const upcoming = [...invoices]
+    .filter(i => i.status === 'sent' || i.status === 'unpaid')
+    .sort((a,b) => (a.date_invoiced||'') > (b.date_invoiced||'') ? 1 : -1)
+    .slice(0,5);
+
+  c.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card indigo"><div class="label">Total Invoiced</div><div class="value">${fmt(totalInvoiced)}</div><div class="sub">${invoices.length} invoice${invoices.length!==1?'s':''}</div></div>
+      <div class="kpi-card green"><div class="label">Total Received</div><div class="value">${fmt(totalPaid)}</div><div class="sub">${invoices.filter(i=>i.status==='paid').length} paid</div></div>
+      <div class="kpi-card amber"><div class="label">Outstanding</div><div class="value">${fmt(outstanding)}</div><div class="sub">${invoices.filter(i=>!['paid','cancelled'].includes(i.status)).length} open</div></div>
+      <div class="kpi-card red"><div class="label">Overdue</div><div class="value">${overdue}</div><div class="sub">invoices past 30 days</div></div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-card"><h3>Invoice Status Breakdown</h3><div class="chart-wrap"><canvas id="ch-status"></canvas></div></div>
+      <div class="chart-card"><h3>Revenue by Project</h3><div class="chart-wrap"><canvas id="ch-proj"></canvas></div></div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-toolbar" style="background:var(--gray-50);padding:12px 16px;">
+        <span style="font-size:.85rem;font-weight:600;color:var(--gray-700);">Recent Invoices</span>
+      </div>
+      <table>
+        <thead><tr><th>Invoice #</th><th>Project</th><th>Owner</th><th>Date Invoiced</th><th>Amount</th><th>Status</th><th>Date Paid</th></tr></thead>
+        <tbody>
+          ${invoices.slice(0,8).map(i => `<tr>
+            <td><strong>${i.invoice_number||'—'}</strong></td>
+            <td>${projectName(i.project_id)}</td>
+            <td>${i.owner||'—'}</td>
+            <td>${fmtDate(i.date_invoiced)}</td>
+            <td><strong>${fmt(i.invoice_amount)}</strong></td>
+            <td>${statusBadge(i.status)}</td>
+            <td>${fmtDate(i.date_paid)}</td>
+          </tr>`).join('')}
+          ${invoices.length===0?'<tr><td colspan="7" class="no-data">No invoices yet</td></tr>':''}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Charts
+  destroyCharts();
+  // Status doughnut
+  const statuses = ['draft','sent','paid','overdue','cancelled'];
+  const statusColors = ['#9ca3af','#60a5fa','#34d399','#f87171','#d1d5db'];
+  const statusCounts = statuses.map(s => invoices.filter(i => i.status===s).length);
+  charts['status'] = new Chart(document.getElementById('ch-status'), {
+    type: 'doughnut',
+    data: { labels: statuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)), datasets: [{ data: statusCounts, backgroundColor: statusColors, borderWidth: 2 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ boxWidth:12, font:{size:11} } } } }
+  });
+
+  // Revenue by project bar
+  const projRevenue = projects.map(p => ({
+    name: p.name,
+    total: invoices.filter(i => i.project_id===p.id && i.status==='paid').reduce((s,i) => s+fmtNum(i.invoice_amount), 0)
+  })).sort((a,b) => b.total-a.total).slice(0,8);
+  charts['proj'] = new Chart(document.getElementById('ch-proj'), {
+    type: 'bar',
+    data: {
+      labels: projRevenue.map(p => p.name),
+      datasets: [{ label: 'Paid ($)', data: projRevenue.map(p => p.total), backgroundColor: '#818cf8', borderRadius: 5 }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback: v => '$'+v.toLocaleString() } } } }
+  });
+}
+
+function destroyCharts() {
+  Object.values(charts).forEach(ch => { try { ch.destroy(); } catch(e){} });
+  charts = {};
+}
+
+// ── INVOICES ──────────────────────────────────────────────────────────────────
+function renderInvoices(c, acts) {
+  acts.innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="exportInvoicesExcel()">⬇ Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportInvoicesPDF()">⬇ PDF</button>
+    <button class="btn btn-primary btn-sm" onclick="openGenerateModal()">✨ Generate Invoice</button>
+    <button class="btn btn-primary btn-sm" onclick="openInvoiceModal()">＋ Add Manual</button>
+  `;
+
+  const filtered = filterInvoices();
+  const paginated = filtered.slice((invPage-1)*PAGE_SIZE, invPage*PAGE_SIZE);
+
+  c.innerHTML = `
+    <div class="table-card">
+      <div class="table-toolbar">
+        <input type="text" placeholder="Search invoice #, project, owner…" style="width:220px" value="${invSearch}" oninput="invSearch=this.value;invPage=1;rerenderInvoices()">
+        <select onchange="invStatus=this.value;invPage=1;rerenderInvoices()">
+          <option value="">All Statuses</option>
+          ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${invStatus===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+        </select>
+        <select onchange="invProject=this.value;invPage=1;rerenderInvoices()">
+          <option value="">All Projects</option>
+          ${projects.map(p=>`<option value="${p.id}" ${invProject===p.id?'selected':''}>${p.name}</option>`).join('')}
+        </select>
+        <div class="date-range">
+          <input type="date" style="width:140px" value="${invDateFrom}" onchange="invDateFrom=this.value;invPage=1;rerenderInvoices()" title="From date">
+          <span>→</span>
+          <input type="date" style="width:140px" value="${invDateTo}" onchange="invDateTo=this.value;invPage=1;rerenderInvoices()" title="To date">
+        </div>
+        ${(invSearch||invStatus||invProject||invDateFrom||invDateTo)?`<button class="btn btn-secondary btn-sm" onclick="clearInvFilters()">✕ Clear</button>`:''}
+        <span style="margin-left:auto;font-size:.78rem;color:var(--gray-400)">${filtered.length} result${filtered.length!==1?'s':''}</span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Invoice #</th><th>Project</th><th>Owner</th>
+          <th>Date Invoiced</th><th>Amount</th><th>Status</th>
+          <th>Date Paid</th><th>Notes</th><th></th>
+        </tr></thead>
+        <tbody id="inv-tbody">
+          ${paginated.length===0?`<tr><td colspan="9" class="no-data">No invoices match filters</td></tr>`
+            : paginated.map(i => `<tr>
+              <td><strong>${i.invoice_number||'—'}</strong></td>
+              <td><span class="color-dot" style="background:${projects.find(p=>p.id===i.project_id)?.color||'#ccc'}"></span> ${projectName(i.project_id)}</td>
+              <td>${i.owner||'—'}</td>
+              <td>${fmtDate(i.date_invoiced)}</td>
+              <td><strong>${fmt(i.invoice_amount)}</strong></td>
+              <td>${statusBadge(i.status)}</td>
+              <td>${fmtDate(i.date_paid)}</td>
+              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${i.notes||''}">${i.notes||'—'}</td>
+              <td>
+                <button class="btn btn-secondary btn-sm" onclick="openInvoiceModal('${i.id}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="printInvoice('${i.id}')">🖨</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${i.id}')">✕</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="pagination">
+        <span>Page ${invPage} of ${Math.max(1,Math.ceil(filtered.length/PAGE_SIZE))}</span>
+        <div style="display:flex;gap:6px">
+          <button ${invPage<=1?'disabled':''} onclick="invPage--;rerenderInvoices()">← Prev</button>
+          <button ${invPage>=Math.ceil(filtered.length/PAGE_SIZE)?'disabled':''} onclick="invPage++;rerenderInvoices()">Next →</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function filterInvoices() {
+  return invoices.filter(i => {
+    const s = (invSearch||'').toLowerCase();
+    if (s && !((i.invoice_number||'').toLowerCase().includes(s) || projectName(i.project_id).toLowerCase().includes(s) || (i.owner||'').toLowerCase().includes(s) || (i.notes||'').toLowerCase().includes(s))) return false;
+    if (invStatus && i.status !== invStatus) return false;
+    if (invProject && i.project_id !== invProject) return false;
+    if (invDateFrom && (i.date_invoiced||'') < invDateFrom) return false;
+    if (invDateTo && (i.date_invoiced||'') > invDateTo) return false;
+    return true;
+  });
+}
+
+function clearInvFilters() { invSearch=''; invStatus=''; invProject=''; invDateFrom=''; invDateTo=''; invPage=1; rerenderInvoices(); }
+
+async function rerenderInvoices() {
+  await loadAll();
+  const c = document.getElementById('content');
+  const acts = document.getElementById('topbar-actions');
+  renderInvoices(c, acts);
+}
+
+// ── INVOICE MODAL ─────────────────────────────────────────────────────────────
+function openInvoiceModal(id) {
+  const inv = id ? invoices.find(i => i.id === id) : null;
+  const html = `
+    <div class="modal-overlay" id="inv-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>${inv ? 'Edit Invoice' : 'New Invoice'}</h2>
+          <button class="close-btn" onclick="closeModal('inv-modal')">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Invoice Number</label>
+              <input type="text" id="f-inv-num" value="${inv?.invoice_number || generateInvoiceNumber()}">
+            </div>
+            <div class="form-group">
+              <label>Project</label>
+              <select id="f-inv-proj">
+                <option value="">— None —</option>
+                ${projects.map(p=>`<option value="${p.id}" ${inv?.project_id===p.id?'selected':''}>${p.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Owner</label>
+              <input type="text" id="f-inv-owner" value="${inv?.owner||''}">
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select id="f-inv-status">
+                ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${(inv?.status||'draft')===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Date Invoiced</label>
+              <input type="date" id="f-inv-date" value="${inv?.date_invoiced||''}">
+            </div>
+            <div class="form-group">
+              <label>Invoice Amount ($)</label>
+              <input type="number" id="f-inv-amount" min="0" step="0.01" value="${inv?.invoice_amount||''}">
+            </div>
+            <div class="form-group">
+              <label>Date Payment Received</label>
+              <input type="date" id="f-inv-paid" value="${inv?.date_paid||''}">
+            </div>
+            <div class="form-group full">
+              <label>Notes</label>
+              <textarea id="f-inv-notes">${inv?.notes||''}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('inv-modal')">Cancel</button>
+          <button class="btn btn-primary" onclick="saveInvoice('${id||''}')">Save Invoice</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function saveInvoice(id) {
+  const data = {
+    invoice_number: document.getElementById('f-inv-num').value.trim(),
+    project_id: document.getElementById('f-inv-proj').value || null,
+    owner: document.getElementById('f-inv-owner').value.trim() || null,
+    status: document.getElementById('f-inv-status').value,
+    date_invoiced: document.getElementById('f-inv-date').value || null,
+    invoice_amount: parseFloat(document.getElementById('f-inv-amount').value) || 0,
+    date_paid: document.getElementById('f-inv-paid').value || null,
+    notes: document.getElementById('f-inv-notes').value.trim() || null,
+  };
+  if (!data.invoice_number) { toast('Invoice number is required'); return; }
+  let err;
+  if (id) {
+    ({error: err} = await sb.from('inv_invoices').update(data).eq('id', id));
+  } else {
+    ({error: err} = await sb.from('inv_invoices').insert(data));
+  }
+  if (err) { toast('Error: ' + err.message); return; }
+  closeModal('inv-modal');
+  toast(id ? 'Invoice updated' : 'Invoice created');
+  await rerenderInvoices();
+}
+
+async function deleteInvoice(id) {
+  if (!confirm('Delete this invoice?')) return;
+  await sb.from('inv_line_items').delete().eq('invoice_id', id);
+  const {error} = await sb.from('inv_invoices').delete().eq('id', id);
+  if (error) { toast('Error: ' + error.message); return; }
+  toast('Invoice deleted');
+  await rerenderInvoices();
+}
+
+// ── GENERATE INVOICE MODAL ────────────────────────────────────────────────────
+const UPFRONT_SERVICES = [
+  {key:'edc_upfront', label:'EDC'},
+  {key:'rtsm_upfront', label:'RTSM'},
+  {key:'custom_build_upfront', label:'Custom Build'},
+  {key:'epro_upfront', label:'ePRO'},
+  {key:'econsent_upfront', label:'eConsent'},
+  {key:'adjudication_upfront', label:'Adjudication'},
+];
+const MONTHLY_SERVICES = [
+  {key:'edc_rtsm_monthly', label:'EDC / RTSM'},
+  {key:'etmf_monthly', label:'eTMF'},
+  {key:'ctms_monthly', label:'CTMS'},
+  {key:'epro_monthly', label:'ePRO'},
+  {key:'econsent_monthly', label:'eConsent'},
+  {key:'adjudication_monthly', label:'Adjudication'},
+  {key:'project_management_monthly', label:'Project Management'},
+];
+
+function openGenerateModal() {
+  if (projects.length === 0) { toast('Add a project first'); return; }
+  const html = `
+    <div class="modal-overlay" id="gen-modal">
+      <div class="modal" style="max-width:760px">
+        <div class="modal-header">
+          <h2>✨ Generate Invoice from Project</h2>
+          <button class="close-btn" onclick="closeModal('gen-modal')">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="section-title">1. Select Project</div>
+          <div class="gen-project-list" id="gen-proj-list">
+            ${projects.map(p => `
+              <div class="gen-project-card" id="gpc-${p.id}" onclick="selectGenProject('${p.id}')">
+                <input type="radio" name="gen-proj" value="${p.id}" id="gr-${p.id}">
+                <div class="proj-name"><span class="color-dot" style="background:${p.color}"></span>${p.name}</div>
+                <div class="proj-meta">${p.owner||'No owner'} · ${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}</div>
+              </div>`).join('')}
+          </div>
+
+          <div id="gen-services-section" class="hidden">
+            <div class="section-title">2. Select Services to Invoice</div>
+            <div style="font-size:.8rem;font-weight:600;color:var(--gray-500);margin-bottom:6px">UPFRONT BUILD</div>
+            <div class="service-checks" id="gen-upfront-checks"></div>
+            <div style="font-size:.8rem;font-weight:600;color:var(--gray-500);margin:14px 0 6px">MONTHLY RECURRING</div>
+            <div class="service-checks" id="gen-monthly-checks"></div>
+
+            <div class="invoice-total-bar">
+              <div class="total-label">Invoice Total</div>
+              <div class="total-amount" id="gen-total">$0.00</div>
+            </div>
+
+            <div class="section-title">3. Invoice Details</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Invoice Number</label>
+                <input type="text" id="gen-inv-num" value="${generateInvoiceNumber()}">
+              </div>
+              <div class="form-group">
+                <label>Owner</label>
+                <input type="text" id="gen-inv-owner">
+              </div>
+              <div class="form-group">
+                <label>Date Invoiced</label>
+                <input type="date" id="gen-inv-date" value="${new Date().toISOString().split('T')[0]}">
+              </div>
+              <div class="form-group">
+                <label>Status</label>
+                <select id="gen-inv-status">
+                  <option value="draft">Draft</option>
+                  <option value="sent" selected>Sent</option>
+                </select>
+              </div>
+              <div class="form-group full">
+                <label>Notes</label>
+                <textarea id="gen-inv-notes" placeholder="Optional notes…"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('gen-modal')">Cancel</button>
+          <button class="btn btn-success" onclick="saveGeneratedInvoice()" id="gen-save-btn" disabled>💾 Save &amp; Download PDF</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function selectGenProject(id) {
+  // Update radio + card highlight
+  document.querySelectorAll('.gen-project-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById('gpc-' + id);
+  if (card) { card.classList.add('selected'); document.getElementById('gr-' + id).checked = true; }
+
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+
+  // Build service checkboxes
+  const upfront = document.getElementById('gen-upfront-checks');
+  const monthly = document.getElementById('gen-monthly-checks');
+
+  upfront.innerHTML = UPFRONT_SERVICES.map(svc => {
+    const amt = fmtNum(p[svc.key]);
+    return `<div class="service-check">
+      <label><input type="checkbox" class="gen-svc-chk" data-amount="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
+      <span class="svc-amount">${fmt(amt)}</span>
+    </div>`;
+  }).join('');
+
+  monthly.innerHTML = MONTHLY_SERVICES.map(svc => {
+    const amt = fmtNum(p[svc.key]);
+    return `<div class="service-check">
+      <label><input type="checkbox" class="gen-svc-chk" data-amount="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
+      <span class="svc-amount">${fmt(amt)}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('gen-services-section').classList.remove('hidden');
+  document.getElementById('gen-inv-owner').value = p.owner || '';
+  document.getElementById('gen-save-btn').disabled = false;
+  updateGenTotal();
+}
+
+function updateGenTotal() {
+  const total = [...document.querySelectorAll('.gen-svc-chk:checked')].reduce((s, el) => s + parseFloat(el.dataset.amount||0), 0);
+  document.getElementById('gen-total').textContent = fmt(total);
+}
+
+async function saveGeneratedInvoice() {
+  const projId = document.querySelector('input[name="gen-proj"]:checked')?.value;
+  if (!projId) { toast('Select a project'); return; }
+
+  // Collect selected services
+  const allSvcs = [...UPFRONT_SERVICES.map(s=>({...s,type:'upfront'})), ...MONTHLY_SERVICES.map(s=>({...s,type:'monthly'}))];
+  const p = projects.find(x => x.id === projId);
+  const selectedSvcs = [];
+  [...document.querySelectorAll('.gen-svc-chk:checked')].forEach((el, idx) => {
+    const parent = el.closest('.service-check');
+    const label = parent.querySelector('label').textContent.trim();
+    selectedSvcs.push({ service_name: label, service_type: el.closest('#gen-monthly-checks') ? 'monthly' : 'upfront', amount: parseFloat(el.dataset.amount) });
+  });
+
+  const total = selectedSvcs.reduce((s,x) => s + x.amount, 0);
+  const invoiceData = {
+    invoice_number: document.getElementById('gen-inv-num').value.trim() || generateInvoiceNumber(),
+    project_id: projId,
+    owner: document.getElementById('gen-inv-owner').value.trim() || null,
+    date_invoiced: document.getElementById('gen-inv-date').value || null,
+    invoice_amount: total,
+    status: document.getElementById('gen-inv-status').value,
+    notes: document.getElementById('gen-inv-notes').value.trim() || null,
+  };
+
+  const {data: saved, error} = await sb.from('inv_invoices').insert(invoiceData).select().single();
+  if (error) { toast('Error: ' + error.message); return; }
+
+  if (selectedSvcs.length > 0) {
+    await sb.from('inv_line_items').insert(selectedSvcs.map(s => ({...s, invoice_id: saved.id})));
+  }
+
+  closeModal('gen-modal');
+  toast('Invoice created!');
+  await loadAll();
+  printInvoice(saved.id);
+  await rerenderInvoices();
+}
+
+// ── PDF INVOICE PRINT ─────────────────────────────────────────────────────────
+function printInvoice(invoiceId) {
+  const inv = invoices.find(i => i.id === invoiceId);
+  if (!inv) { toast('Invoice not found'); return; }
+  const proj = projects.find(p => p.id === inv.project_id);
+  const items = lineItems.filter(l => l.invoice_id === invoiceId);
+
+  const upfrontItems = items.filter(l => l.service_type === 'upfront');
+  const monthlyItems = items.filter(l => l.service_type === 'monthly');
+  const totalAmt = fmtNum(inv.invoice_amount);
+
+  const pdfDiv = document.getElementById('pdf-invoice');
+  pdfDiv.innerHTML = `
+    <style>
+      @media print {
+        #pdf-invoice { display: block !important; font-family: -apple-system, sans-serif; padding: 40px; color: #111; max-width: 700px; margin: 0 auto; }
+        .pdf-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+        .pdf-logo { font-size: 1.5rem; font-weight: 700; color: #4f46e5; }
+        .pdf-invoice-meta { text-align: right; }
+        .pdf-invoice-meta h1 { font-size: 2rem; color: #4f46e5; margin-bottom: 4px; }
+        .pdf-section { margin-bottom: 28px; }
+        .pdf-section h4 { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+        .pdf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: .88rem; }
+        .pdf-grid .lbl { color: #6b7280; }
+        table.pdf-tbl { width: 100%; border-collapse: collapse; font-size: .85rem; }
+        table.pdf-tbl th { background: #f3f4f6; padding: 8px 12px; text-align: left; font-size: .72rem; text-transform: uppercase; color: #6b7280; }
+        table.pdf-tbl td { padding: 8px 12px; border-bottom: 1px solid #f3f4f6; }
+        .pdf-total-row { background: #eef2ff; font-weight: 700; }
+        .pdf-footer { margin-top: 40px; font-size: .75rem; color: #9ca3af; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 16px; }
+      }
+    </style>
+    <div class="pdf-header">
+      <div>
+        <div class="pdf-logo">💼 Invoice Hub</div>
+        <div style="font-size:.85rem;color:#6b7280;margin-top:4px">Fountayn</div>
+      </div>
+      <div class="pdf-invoice-meta">
+        <h1>INVOICE</h1>
+        <div style="font-size:1rem;font-weight:600">${inv.invoice_number}</div>
+        <div style="font-size:.82rem;color:#6b7280;margin-top:4px">
+          ${inv.status ? `<span style="background:#eef2ff;color:#4f46e5;padding:2px 8px;border-radius:12px;font-size:.72rem;font-weight:600;text-transform:uppercase">${inv.status}</span>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <div class="pdf-section">
+      <h4>Invoice Details</h4>
+      <div class="pdf-grid">
+        <div><div class="lbl">Project</div><strong>${proj?.name||'—'}</strong></div>
+        <div><div class="lbl">Owner</div>${inv.owner||'—'}</div>
+        <div><div class="lbl">Date Invoiced</div>${fmtDate(inv.date_invoiced)}</div>
+        <div><div class="lbl">Date Paid</div>${fmtDate(inv.date_paid)}</div>
+        ${proj?`<div><div class="lbl">Project Start</div>${fmtDate(proj.start_date)}</div><div><div class="lbl">Project End</div>${fmtDate(proj.end_date)}</div>`:''}
+      </div>
+    </div>
+
+    ${items.length > 0 ? `
+    <div class="pdf-section">
+      <h4>Line Items</h4>
+      <table class="pdf-tbl">
+        <thead><tr><th>Service</th><th>Type</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          ${upfrontItems.length>0?`<tr><td colspan="3" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Upfront Build</td></tr>
+          ${upfrontItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Upfront</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+          ${monthlyItems.length>0?`<tr><td colspan="3" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Monthly Recurring</td></tr>
+          ${monthlyItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Monthly</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+          <tr class="pdf-total-row"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totalAmt)}</td></tr>
+        </tbody>
+      </table>
+    </div>` : `
+    <div class="pdf-section">
+      <h4>Invoice Amount</h4>
+      <div style="font-size:1.8rem;font-weight:700;color:#4f46e5">${fmt(totalAmt)}</div>
+    </div>`}
+
+    ${inv.notes ? `<div class="pdf-section"><h4>Notes</h4><p style="font-size:.85rem;color:#374151">${inv.notes}</p></div>` : ''}
+
+    <div class="pdf-footer">Generated by Invoice Hub · Fountayn · ${new Date().toLocaleDateString()}</div>
+  `;
+
+  window.print();
+}
+
+// ── PROJECTS ──────────────────────────────────────────────────────────────────
+function renderProjects(c, acts) {
+  acts.innerHTML = `<button class="btn btn-primary btn-sm" onclick="openProjectModal()">＋ Add Project</button>`;
+
+  c.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px" id="proj-grid">
+      ${projects.length===0 ? '<div style="color:var(--gray-400);padding:40px;font-size:.875rem">No projects yet. Click "+ Add Project" to start.</div>' : ''}
+      ${projects.map(p => {
+        const invCount = invoices.filter(i => i.project_id === p.id).length;
+        const paidAmt = invoices.filter(i => i.project_id===p.id && i.status==='paid').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+        const totalUpfront = UPFRONT_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
+        const totalMonthly = MONTHLY_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
+        return `<div class="table-card" style="padding:0;overflow:hidden">
+          <div style="height:5px;background:${p.color}"></div>
+          <div style="padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+              <div>
+                <div style="font-weight:700;font-size:.975rem">${p.name}</div>
+                <div style="font-size:.75rem;color:var(--gray-400);margin-top:2px">${p.owner||'No owner'} · ${fmtDate(p.start_date)} – ${fmtDate(p.end_date)}</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-secondary btn-sm" onclick="openProjectModal('${p.id}')">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')">✕</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.78rem;margin-bottom:12px">
+              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
+                <div style="color:var(--gray-400);margin-bottom:2px">Total Upfront</div>
+                <div style="font-weight:700">${fmt(totalUpfront)}</div>
+              </div>
+              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
+                <div style="color:var(--gray-400);margin-bottom:2px">Monthly Recurring</div>
+                <div style="font-weight:700">${fmt(totalMonthly)}/mo</div>
+              </div>
+              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
+                <div style="color:var(--gray-400);margin-bottom:2px">Invoices</div>
+                <div style="font-weight:700">${invCount}</div>
+              </div>
+              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
+                <div style="color:var(--gray-400);margin-bottom:2px">Paid to Date</div>
+                <div style="font-weight:700;color:var(--success)">${fmt(paidAmt)}</div>
+              </div>
+            </div>
+            <details style="font-size:.75rem">
+              <summary style="cursor:pointer;color:var(--primary);font-weight:500">View pricing breakdown</summary>
+              <table style="width:100%;margin-top:8px;border-collapse:collapse">
+                <tr style="background:var(--gray-50)"><th style="padding:4px 8px;text-align:left;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Service</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Upfront</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Monthly</th></tr>
+                ${['EDC','RTSM','Custom Build','ePRO','eConsent','Adjudication'].map((name,i) => {
+                  const uk = UPFRONT_SERVICES[i]?.key;
+                  const mk = i < MONTHLY_SERVICES.length ? MONTHLY_SERVICES[i]?.key : null;
+                  const uAmt = uk ? fmtNum(p[uk]) : 0;
+                  const mAmt = mk ? fmtNum(p[mk]) : 0;
+                  if (uAmt===0 && mAmt===0) return '';
+                  return `<tr><td style="padding:4px 8px">${name}</td><td style="padding:4px 8px;text-align:right">${uAmt>0?fmt(uAmt):'—'}</td><td style="padding:4px 8px;text-align:right">${mAmt>0?fmt(mAmt)+'<small>/mo</small>':'—'}</td></tr>`;
+                }).join('')}
+                ${MONTHLY_SERVICES.filter(svc=>!['edc_rtsm_monthly','epro_monthly','econsent_monthly','adjudication_monthly'].includes(svc.key)).map(svc=>{
+                  const amt=fmtNum(p[svc.key]);
+                  return amt>0?`<tr><td style="padding:4px 8px">${svc.label}</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">${fmt(amt)}<small>/mo</small></td></tr>`:'';
+                }).join('')}
+              </table>
+            </details>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function openProjectModal(id) {
+  const p = id ? projects.find(x => x.id === id) : null;
+  const v = (key, def='') => p ? (p[key] ?? def) : def;
+  const html = `
+    <div class="modal-overlay" id="proj-modal">
+      <div class="modal" style="max-width:720px">
+        <div class="modal-header">
+          <h2>${p ? 'Edit Project' : 'New Project'}</h2>
+          <button class="close-btn" onclick="closeModal('proj-modal')">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Project Name</label>
+              <input type="text" id="fp-name" value="${v('name')}">
+            </div>
+            <div class="form-group">
+              <label>Color</label>
+              <input type="color" id="fp-color" value="${v('color','#4f46e5')}" style="width:100%">
+            </div>
+            <div class="form-group">
+              <label>Owner</label>
+              <input type="text" id="fp-owner" value="${v('owner')}">
+            </div>
+            <div class="form-group"></div>
+            <div class="form-group">
+              <label>Start Date</label>
+              <input type="date" id="fp-start" value="${v('start_date')}">
+            </div>
+            <div class="form-group">
+              <label>End Date</label>
+              <input type="date" id="fp-end" value="${v('end_date')}">
+            </div>
+          </div>
+
+          <div class="section-title">Upfront Build Pricing</div>
+          <table class="pricing-table">
+            <thead><tr><th>Service</th><th>Amount ($)</th></tr></thead>
+            <tbody>
+              ${UPFRONT_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td></tr>`).join('')}
+              <tr><td colspan="1" style="text-align:right;font-weight:700;padding:8px 10px">Total Upfront</td><td style="font-weight:700;padding:8px 10px;color:var(--primary)" id="fp-upfront-total"></td></tr>
+            </tbody>
+          </table>
+
+          <div class="section-title">Monthly Recurring Pricing</div>
+          <table class="pricing-table">
+            <thead><tr><th>Service</th><th>Amount / month ($)</th></tr></thead>
+            <tbody>
+              ${MONTHLY_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td></tr>`).join('')}
+              <tr><td colspan="1" style="text-align:right;font-weight:700;padding:8px 10px">Total Monthly</td><td style="font-weight:700;padding:8px 10px;color:var(--success)" id="fp-monthly-total"></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('proj-modal')">Cancel</button>
+          <button class="btn btn-primary" onclick="saveProject('${id||''}')">Save Project</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  updateProjectTotal();
+}
+
+function updateProjectTotal() {
+  const ut = UPFRONT_SERVICES.reduce((s,svc) => s + (parseFloat(document.getElementById('fp-'+svc.key)?.value)||0), 0);
+  const mt = MONTHLY_SERVICES.reduce((s,svc) => s + (parseFloat(document.getElementById('fp-'+svc.key)?.value)||0), 0);
+  const uel = document.getElementById('fp-upfront-total');
+  const mel = document.getElementById('fp-monthly-total');
+  if (uel) uel.textContent = fmt(ut);
+  if (mel) mel.textContent = fmt(mt) + '/mo';
+}
+
+async function saveProject(id) {
+  const name = document.getElementById('fp-name').value.trim();
+  if (!name) { toast('Project name is required'); return; }
+  const data = {
+    name,
+    color: document.getElementById('fp-color').value,
+    owner: document.getElementById('fp-owner').value.trim() || null,
+    start_date: document.getElementById('fp-start').value || null,
+    end_date: document.getElementById('fp-end').value || null,
+  };
+  [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].forEach(svc => {
+    data[svc.key] = parseFloat(document.getElementById('fp-'+svc.key)?.value) || 0;
+  });
+  let err;
+  if (id) {
+    ({error:err} = await sb.from('inv_projects').update(data).eq('id',id));
+  } else {
+    ({error:err} = await sb.from('inv_projects').insert(data));
+  }
+  if (err) { toast('Error: ' + err.message); return; }
+  closeModal('proj-modal');
+  toast(id ? 'Project updated' : 'Project created');
+  await renderView();
+}
+
+async function deleteProject(id) {
+  if (!confirm('Delete this project? Associated invoices will have their project unlinked.')) return;
+  const {error} = await sb.from('inv_projects').delete().eq('id',id);
+  if (error) { toast('Error: ' + error.message); return; }
+  toast('Project deleted');
+  await renderView();
+}
+
+// ── REPORTS ───────────────────────────────────────────────────────────────────
+function renderReports(c, acts) {
+  acts.innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="exportReportsExcel()">⬇ Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportReportsPDF()">⬇ PDF</button>
+  `;
+
+  const filtered = filterReports();
+  const paginated = filtered.slice((repPage-1)*PAGE_SIZE, repPage*PAGE_SIZE);
+
+  const totalAmt = filtered.reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+  const paidAmt  = filtered.filter(i=>i.status==='paid').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+  const outstanding = filtered.filter(i=>!['paid','cancelled'].includes(i.status)).reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+
+  c.innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
+      <div class="kpi-card indigo"><div class="label">Filtered Total</div><div class="value">${fmt(totalAmt)}</div></div>
+      <div class="kpi-card green"><div class="label">Paid</div><div class="value">${fmt(paidAmt)}</div></div>
+      <div class="kpi-card amber"><div class="label">Outstanding</div><div class="value">${fmt(outstanding)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-toolbar">
+        <input type="text" placeholder="Search…" style="width:200px" value="${repSearch}" oninput="repSearch=this.value;repPage=1;rerenderReports()">
+        <select onchange="repStatus=this.value;repPage=1;rerenderReports()">
+          <option value="">All Statuses</option>
+          ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${repStatus===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+        </select>
+        <select onchange="repProject=this.value;repPage=1;rerenderReports()">
+          <option value="">All Projects</option>
+          ${projects.map(p=>`<option value="${p.id}" ${repProject===p.id?'selected':''}>${p.name}</option>`).join('')}
+        </select>
+        <div class="date-range">
+          <input type="date" style="width:140px" value="${repDateFrom}" onchange="repDateFrom=this.value;repPage=1;rerenderReports()">
+          <span>→</span>
+          <input type="date" style="width:140px" value="${repDateTo}" onchange="repDateTo=this.value;repPage=1;rerenderReports()">
+        </div>
+        ${(repSearch||repStatus||repProject||repDateFrom||repDateTo)?`<button class="btn btn-secondary btn-sm" onclick="clearRepFilters()">✕ Clear</button>`:''}
+        <span style="margin-left:auto;font-size:.78rem;color:var(--gray-400)">${filtered.length} result${filtered.length!==1?'s':''}</span>
+      </div>
+      <table>
+        <thead><tr><th>Invoice #</th><th>Project</th><th>Owner</th><th>Date Invoiced</th><th>Amount</th><th>Status</th><th>Date Paid</th><th>Notes</th></tr></thead>
+        <tbody>
+          ${paginated.length===0?`<tr><td colspan="8" class="no-data">No results</td></tr>`
+            : paginated.map(i=>`<tr>
+              <td><strong>${i.invoice_number||'—'}</strong></td>
+              <td>${projectName(i.project_id)}</td>
+              <td>${i.owner||'—'}</td>
+              <td>${fmtDate(i.date_invoiced)}</td>
+              <td><strong>${fmt(i.invoice_amount)}</strong></td>
+              <td>${statusBadge(i.status)}</td>
+              <td>${fmtDate(i.date_paid)}</td>
+              <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.notes||'—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="pagination">
+        <span>Page ${repPage} of ${Math.max(1,Math.ceil(filtered.length/PAGE_SIZE))}</span>
+        <div style="display:flex;gap:6px">
+          <button ${repPage<=1?'disabled':''} onclick="repPage--;rerenderReports()">← Prev</button>
+          <button ${repPage>=Math.ceil(filtered.length/PAGE_SIZE)?'disabled':''} onclick="repPage++;rerenderReports()">Next →</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function filterReports() {
+  return invoices.filter(i => {
+    const s = (repSearch||'').toLowerCase();
+    if (s && !((i.invoice_number||'').toLowerCase().includes(s) || projectName(i.project_id).toLowerCase().includes(s) || (i.owner||'').toLowerCase().includes(s))) return false;
+    if (repStatus && i.status !== repStatus) return false;
+    if (repProject && i.project_id !== repProject) return false;
+    if (repDateFrom && (i.date_invoiced||'') < repDateFrom) return false;
+    if (repDateTo && (i.date_invoiced||'') > repDateTo) return false;
+    return true;
+  });
+}
+
+function clearRepFilters() { repSearch=''; repStatus=''; repProject=''; repDateFrom=''; repDateTo=''; repPage=1; rerenderReports(); }
+
+async function rerenderReports() {
+  await loadAll();
+  renderReports(document.getElementById('content'), document.getElementById('topbar-actions'));
+}
+
+// ── EXPORTS ───────────────────────────────────────────────────────────────────
+function invoicesToRows(list) {
+  return [
+    ['Invoice #','Project','Owner','Date Invoiced','Amount','Status','Date Paid','Notes'],
+    ...list.map(i => [i.invoice_number||'',projectName(i.project_id),i.owner||'',i.date_invoiced||'',fmtNum(i.invoice_amount),i.status||'',i.date_paid||'',i.notes||''])
+  ];
+}
+
+function exportExcel(rows, filename) {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
+  XLSX.writeFile(wb, filename);
+}
+
+function exportInvoicesExcel() { exportExcel(invoicesToRows(filterInvoices()), 'invoices.xlsx'); }
+function exportReportsExcel() { exportExcel(invoicesToRows(filterReports()), 'invoice-report.xlsx'); }
+
+function buildPrintTable(list, title) {
+  const rows = list.map(i => `<tr>
+    <td>${i.invoice_number||'—'}</td><td>${projectName(i.project_id)}</td><td>${i.owner||'—'}</td>
+    <td>${fmtDate(i.date_invoiced)}</td><td>${fmt(i.invoice_amount)}</td><td>${i.status||'—'}</td>
+    <td>${fmtDate(i.date_paid)}</td><td>${i.notes||'—'}</td>
+  </tr>`).join('');
+  return `<html><head><title>${title}</title><style>
+    body{font-family:sans-serif;padding:20px;font-size:11px}
+    h2{color:#4f46e5;margin-bottom:16px}
+    table{width:100%;border-collapse:collapse}
+    th{background:#eef2ff;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase}
+    td{padding:6px 8px;border-bottom:1px solid #f3f4f6}
+  </style></head><body><h2>${title}</h2>
+  <table><thead><tr><th>Invoice #</th><th>Project</th><th>Owner</th><th>Date Invoiced</th><th>Amount</th><th>Status</th><th>Date Paid</th><th>Notes</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <p style="margin-top:20px;color:#9ca3af;font-size:10px">Generated ${new Date().toLocaleString()}</p>
+  </body></html>`;
+}
+
+function exportInvoicesPDF() {
+  const w = window.open('','_blank'); w.document.write(buildPrintTable(filterInvoices(),'Invoices')); w.document.close(); w.print();
+}
+function exportReportsPDF() {
+  const w = window.open('','_blank'); w.document.write(buildPrintTable(filterReports(),'Invoice Report')); w.document.close(); w.print();
+}
+
+// ── HELP ──────────────────────────────────────────────────────────────────────
+function renderHelp(c) {
+  c.innerHTML = `
+  <div style="max-width:820px;margin:0 auto">
+
+    <div style="background:#1e1b4b;border-radius:12px;padding:28px 32px;margin-bottom:20px;color:#fff">
+      <div style="font-size:1.4rem;font-weight:700;margin-bottom:8px">💼 Welcome to Invoice Hub</div>
+      <div style="font-size:.9rem;color:#a5b4fc;line-height:1.7">
+        Invoice Hub is Fountayn's internal invoicing tool for tracking projects, generating invoices, and monitoring payment status.
+        Use the sidebar to navigate between sections. Your data is saved automatically to the cloud — nothing is stored locally.
+      </div>
+    </div>
+
+    ${[
+      {
+        icon:'📁', title:'Projects',
+        color:'#eef2ff', border:'#c7d2fe', head:'#312e81',
+        intro:'Projects are the foundation of Invoice Hub. Each project stores all your service pricing so invoices can be generated automatically.',
+        steps:[
+          ['Add a project','Click <strong>+ Add Project</strong> in the top-right. Give the project a name, owner, colour (used as a visual tag throughout the app), and start/end dates.'],
+          ['Set upfront pricing','In the project form, enter the one-time build fees for each service: EDC, RTSM, Custom Build, ePRO, eConsent, Adjudication. Leave a field at $0.00 if that service is not in scope — it will be greyed out in the invoice generator.'],
+          ['Set monthly recurring pricing','Enter the monthly recurring fees for EDC/RTSM, eTMF, CTMS, ePRO, eConsent, Adjudication, and Project Management. These appear as selectable line items each time you generate a monthly invoice.'],
+          ['Project card','Each project card shows a summary: total upfront value, monthly rate, number of invoices raised, and total paid to date. Click <em>View pricing breakdown</em> to see the full service-by-service table.'],
+        ]
+      },
+      {
+        icon:'✨', title:'Generating an invoice',
+        color:'#f0fdf4', border:'#bbf7d0', head:'#14532d',
+        intro:'The invoice generator pulls your project pricing into a guided flow and auto-totals the invoice — no manual maths required.',
+        steps:[
+          ['Open the generator','From the Invoices view, click <strong>✨ Generate Invoice</strong> in the top-right.'],
+          ['Select a project','Click any project card to select it. The radio button highlights your selection and immediately loads that project\'s service prices.'],
+          ['Choose services','Two sections appear — <em>Upfront Build</em> and <em>Monthly Recurring</em>. Services priced at $0.00 are automatically disabled. Tick or untick the services you want to include on this invoice. The <strong>Invoice Total</strong> bar updates in real time.'],
+          ['Fill in invoice details','Set the invoice number (auto-generated, but editable), owner, date, and status (Draft or Sent). Add optional notes.'],
+          ['Save & download','Click <strong>Save & Download PDF</strong>. The invoice is saved to the database and your browser\'s print dialog opens immediately — use <em>Save as PDF</em> to download the formatted invoice document.'],
+        ]
+      },
+      {
+        icon:'🧾', title:'Invoices',
+        color:'#eff6ff', border:'#bfdbfe', head:'#1e3a5f',
+        intro:'The Invoices view is your master register of every invoice raised, with full filtering and export.',
+        steps:[
+          ['Adding a manual invoice','Click <strong>+ Add Manual</strong> if you need to log an invoice that wasn\'t generated through the tool (e.g. imported from a legacy system). Fill in the invoice number, project, owner, amount, dates, and status.'],
+          ['Editing an invoice','Click <strong>Edit</strong> on any row to update any field, including marking it as paid and entering the payment date.'],
+          ['Reprinting an invoice','Click the 🖨 icon on any row to reopen the print/PDF dialog for that invoice.'],
+          ['Filtering','Use the search box (searches invoice number, project name, owner, notes), the Status dropdown, the Project dropdown, and the date range pickers to narrow results. The result count updates live. Click <strong>✕ Clear</strong> to reset all filters.'],
+          ['Exporting','<strong>⬇ Excel</strong> exports the current filtered view to an .xlsx file. <strong>⬇ PDF</strong> opens a print-ready table of the filtered results in a new tab.'],
+          ['Statuses','<em>Draft</em> — not yet sent. <em>Sent</em> — issued to the client. <em>Paid</em> — payment received and reconciled. <em>Overdue</em> — past the expected payment window. <em>Cancelled</em> — voided.'],
+        ]
+      },
+      {
+        icon:'📊', title:'Dashboard',
+        color:'#faf5ff', border:'#e9d5ff', head:'#3b0764',
+        intro:'The dashboard gives you an at-a-glance financial summary the moment you log in.',
+        steps:[
+          ['KPI cards','<strong>Total Invoiced</strong> — sum of all invoice amounts regardless of status. <strong>Total Received</strong> — sum of paid invoices only. <strong>Outstanding</strong> — all open invoices (not paid or cancelled). <strong>Overdue</strong> — count of unpaid invoices raised more than 30 days ago.'],
+          ['Status chart','Doughnut chart showing the count of invoices in each status bucket — useful for spotting a build-up in any one category.'],
+          ['Revenue by project','Bar chart of paid revenue per project — shows which studies have settled vs. are still outstanding.'],
+          ['Recent invoices','A quick-view table of your 8 most recent invoices.'],
+        ]
+      },
+      {
+        icon:'📈', title:'Reports',
+        color:'#fff7ed', border:'#fed7aa', head:'#431407',
+        intro:'Reports lets you slice the invoice data across any combination of filters and export a snapshot for finance or management.',
+        steps:[
+          ['Filtering','The same search, status, project, and date-range filters as the Invoices view, but independently controlled so your invoice view is not affected.'],
+          ['Summary KPIs','Three cards above the table show the <em>filtered</em> totals for Invoiced, Paid, and Outstanding — these update as you adjust filters.'],
+          ['Exporting','Excel and PDF exports respect the current filter state — useful for quarterly or per-project reports.'],
+        ]
+      },
+    ].map(sec => `
+      <div style="background:${sec.color};border:1px solid ${sec.border};border-radius:10px;padding:20px 24px;margin-bottom:16px">
+        <div style="font-size:1rem;font-weight:700;color:${sec.head};margin-bottom:6px">${sec.icon} ${sec.title}</div>
+        <div style="font-size:.83rem;color:#374151;margin-bottom:14px;line-height:1.6">${sec.intro}</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${sec.steps.map(([label, text]) => `
+            <div style="display:flex;gap:12px;font-size:.82rem;line-height:1.6">
+              <div style="background:${sec.border};color:${sec.head};border-radius:6px;padding:2px 10px;font-weight:700;white-space:nowrap;height:fit-content;margin-top:1px;font-size:.75rem">${label}</div>
+              <div style="color:#374151">${text}</div>
+            </div>`).join('')}
+        </div>
+      </div>`).join('')}
+
+    <div style="background:var(--gray-100);border-radius:10px;padding:16px 20px;font-size:.8rem;color:var(--gray-500);line-height:1.6">
+      <strong style="color:var(--gray-700)">💡 Tips</strong><br>
+      • Invoice numbers are auto-generated in the format <code>INV-YYYYMM-NNN</code> — you can edit them before saving.<br>
+      • All dates follow MM/DD/YYYY display but are stored as ISO dates — filtering by date range is always accurate.<br>
+      • Deleting a project does not delete its invoices — they remain but show no project name.<br>
+      • The app connects to a shared Supabase database — changes made by one user are visible to all immediately.
+    </div>
+
+  </div>`;
+}
+
+// ── MODAL UTILS ───────────────────────────────────────────────────────────────
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// Close modal on overlay click
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) {
+    e.target.remove();
+  }
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+renderView();
+</script>
+</body>
+</html>
