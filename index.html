@@ -7,7 +7,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
@@ -207,12 +206,21 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const sb = supabase.createClient(SB_URL, SB_KEY);
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────────
-const EJS_SERVICE   = 'service_5jlgxlf';
-const EJS_PUBLIC    = '3IVETYVu63K2Ww6sm';
-const EJS_APPROVAL_TEMPLATE = 'template_qjok7me';
-const EJS_CLIENT_TEMPLATE   = 'template_qjok7me';
 const APP_URL = 'https://invoice-hub-umber.vercel.app';
-emailjs.init(EJS_PUBLIC);
+const SEND_EMAIL_FN = 'https://qlzoyqhsvqtxjvppvymj.supabase.co/functions/v1/send-email';
+
+async function sendEmail({to_email, subject, html_body, attachment_name, attachment_data}) {
+  const r = await fetch(SEND_EMAIL_FN, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({to_email, subject, html_body, attachment_name, attachment_data})
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text);
+  }
+  return r.json();
+}
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let invoices = [], projects = [], lineItems = [];
@@ -1164,22 +1172,14 @@ async function submitForApproval(id) {
   const invoiceUrl  = `${APP_URL}?view_invoice=${id}`;
 
   try {
-    await emailjs.send(EJS_SERVICE, EJS_APPROVAL_TEMPLATE, {
-      to_email:       inv.approver_email,
-      subject:        `Invoice ${inv.invoice_number} requires your approval`,
-      invoice_number: inv.invoice_number,
-      project_name:   proj?.name || '—',
-      owner:          inv.owner || '—',
-      date_invoiced:  fmtDate(inv.date_invoiced),
-      amount:         fmt(inv.invoice_amount),
-      notes:          inv.notes || '',
-      approve_url:    approveUrl,
-      reject_url:     rejectUrl,
-      html_body:      buildApprovalEmailHtml(inv, proj, approveUrl, rejectUrl, invoiceUrl),
+    await sendEmail({
+      to_email: inv.approver_email,
+      subject:  `Invoice ${inv.invoice_number} requires your approval`,
+      html_body: buildApprovalEmailHtml(inv, proj, approveUrl, rejectUrl, invoiceUrl),
     });
     toast(`Approval request sent to ${inv.approver_email}`);
   } catch(e) {
-    toast('Invoice updated but email failed — check EmailJS template IDs');
+    toast('Email failed: ' + (e?.message || e));
     console.error(e);
   }
   await rerenderInvoices();
@@ -1216,25 +1216,17 @@ async function sendToClient(id) {
 
   try {
     const params = {
-      to_email:       inv.client_email,
-      subject:        `Invoice ${inv.invoice_number} from Fountayn`,
-      invoice_number: inv.invoice_number,
-      project_name:   proj?.name || '—',
-      owner:          inv.owner || '—',
-      date_invoiced:  fmtDate(inv.date_invoiced),
-      amount:         fmt(inv.invoice_amount),
-      notes:          inv.notes || '',
-      html_body:      buildClientEmailHtml(inv, proj, items),
+      to_email:        inv.client_email,
+      subject:         `Invoice ${inv.invoice_number} from Fountayn`,
+      html_body:       buildClientEmailHtml(inv, proj, items),
+      attachment_name: pdfBase64 ? `Invoice_${inv.invoice_number}.pdf` : undefined,
+      attachment_data: pdfBase64 || undefined,
     };
-    if (pdfBase64) {
-      params.attachment_name = `Invoice_${inv.invoice_number}.pdf`;
-      params.attachment_data = pdfBase64;
-    }
-    await emailjs.send(EJS_SERVICE, EJS_CLIENT_TEMPLATE, params);
+    await sendEmail(params);
     await sb.from('inv_invoices').update({status:'approved_sent'}).eq('id', id);
     toast(`Invoice sent to ${inv.client_email} ✓`);
   } catch(e) {
-    toast('Email failed — check EmailJS template IDs');
+    toast('Email failed: ' + (e?.message || e));
     console.error(e);
   }
   await rerenderInvoices();
