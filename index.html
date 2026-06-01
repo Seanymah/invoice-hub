@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --primary: #4f46e5;
@@ -94,6 +95,9 @@
   .badge-overdue { background: #fee2e2; color: #991b1b; }
   .badge-draft { background: var(--gray-100); color: var(--gray-700); }
   .badge-cancelled { background: var(--gray-200); color: var(--gray-500); }
+  .badge-pending_approval { background: #fef3c7; color: #78350f; }
+  .badge-approved { background: #d1fae5; color: #065f46; }
+  .badge-rejected { background: #fee2e2; color: #991b1b; }
 
   /* COLOR DOT */
   .color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -200,6 +204,14 @@ const SB_URL = 'https://qlzoyqhsvqtxjvppvymj.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsem95cWhzdnF0eGp2cHB2eW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMjA2MDMsImV4cCI6MjA5NTY5NjYwM30.hLiEXzj6WqyiVI0xuJVddS55Oyps9K7L2_MCKpGZC44';
 const sb = supabase.createClient(SB_URL, SB_KEY);
 
+// ── EMAILJS ───────────────────────────────────────────────────────────────────
+const EJS_SERVICE   = 'service_5jlgxlf';
+const EJS_PUBLIC    = '3IVETYVu63K2Ww6sm';
+const EJS_APPROVAL_TEMPLATE = 'template_approval';   // replace after creating in EmailJS
+const EJS_CLIENT_TEMPLATE   = 'template_client';     // replace after creating in EmailJS
+const APP_URL = 'https://invoice-hub-umber.vercel.app';
+emailjs.init(EJS_PUBLIC);
+
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let invoices = [], projects = [], lineItems = [];
 let currentView = 'dashboard';
@@ -225,7 +237,14 @@ function toast(msg, ms=2800) {
 }
 
 function statusBadge(s) {
-  return `<span class="badge badge-${s||'draft'}">${s||'draft'}</span>`;
+  const labels = { pending_approval:'Pending Approval', approved:'Approved', rejected:'Rejected',
+    draft:'Draft', sent:'Sent', paid:'Paid', overdue:'Overdue', cancelled:'Cancelled' };
+  return `<span class="badge badge-${s||'draft'}">${labels[s]||s||'draft'}</span>`;
+}
+
+function genToken() {
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 }
 
 function generateInvoiceNumber() {
@@ -381,7 +400,7 @@ function renderInvoices(c, acts) {
         <input type="text" placeholder="Search invoice #, project, owner…" style="width:220px" value="${invSearch}" oninput="invSearch=this.value;invPage=1;rerenderInvoices()">
         <select onchange="invStatus=this.value;invPage=1;rerenderInvoices()">
           <option value="">All Statuses</option>
-          ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${invStatus===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+          ${['draft','sent','pending_approval','approved','rejected','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${invStatus===s?'selected':''}>${statusBadge(s).replace(/<[^>]+>/g,'')}</option>`).join('')}
         </select>
         <select onchange="invProject=this.value;invPage=1;rerenderInvoices()">
           <option value="">All Projects</option>
@@ -412,7 +431,10 @@ function renderInvoices(c, acts) {
               <td>${statusBadge(i.status)}</td>
               <td>${fmtDate(i.date_paid)}</td>
               <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${i.notes||''}">${i.notes||'—'}</td>
-              <td>
+              <td style="white-space:nowrap">
+                ${i.status==='draft'||i.status==='sent'?`<button class="btn btn-secondary btn-sm" style="background:#fef3c7;border-color:#f59e0b;color:#92400e" onclick="submitForApproval('${i.id}')">▶ Approve</button>`:''}
+                ${i.status==='pending_approval'?`<button class="btn btn-success btn-sm" onclick="approveInvoice('${i.id}')">✓ Approve</button><button class="btn btn-danger btn-sm" onclick="rejectInvoice('${i.id}')">✕ Reject</button>`:''}
+                ${i.status==='approved'?`<button class="btn btn-primary btn-sm" onclick="sendToClient('${i.id}')">📧 Send</button>`:''}
                 <button class="btn btn-secondary btn-sm" onclick="openInvoiceModal('${i.id}')">Edit</button>
                 <button class="btn btn-secondary btn-sm" onclick="printInvoice('${i.id}')">🖨</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${i.id}')">✕</button>
@@ -455,6 +477,7 @@ async function rerenderInvoices() {
 // ── INVOICE MODAL ─────────────────────────────────────────────────────────────
 function openInvoiceModal(id) {
   const inv = id ? invoices.find(i => i.id === id) : null;
+  const proj = inv ? projects.find(p => p.id === inv.project_id) : null;
   const html = `
     <div class="modal-overlay" id="inv-modal">
       <div class="modal">
@@ -482,7 +505,7 @@ function openInvoiceModal(id) {
             <div class="form-group">
               <label>Status</label>
               <select id="f-inv-status">
-                ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${(inv?.status||'draft')===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+                ${['draft','sent','pending_approval','approved','rejected','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${(inv?.status||'draft')===s?'selected':''}>${{'pending_approval':'Pending Approval','approved':'Approved','rejected':'Rejected','draft':'Draft','sent':'Sent','paid':'Paid','overdue':'Overdue','cancelled':'Cancelled'}[s]}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -496,6 +519,14 @@ function openInvoiceModal(id) {
             <div class="form-group">
               <label>Date Payment Received</label>
               <input type="date" id="f-inv-paid" value="${inv?.date_paid||''}">
+            </div>
+            <div class="form-group">
+              <label>Approver Email</label>
+              <input type="email" id="f-inv-approver" value="${inv?.approver_email||proj?.approver_email||''}" placeholder="approver@fountayn.com">
+            </div>
+            <div class="form-group">
+              <label>Client Email</label>
+              <input type="email" id="f-inv-client" value="${inv?.client_email||proj?.client_email||''}" placeholder="client@sponsor.com">
             </div>
             <div class="form-group full">
               <label>Notes</label>
@@ -521,6 +552,8 @@ async function saveInvoice(id) {
     date_invoiced: document.getElementById('f-inv-date').value || null,
     invoice_amount: parseFloat(document.getElementById('f-inv-amount').value) || 0,
     date_paid: document.getElementById('f-inv-paid').value || null,
+    approver_email: document.getElementById('f-inv-approver').value.trim() || null,
+    client_email: document.getElementById('f-inv-client').value.trim() || null,
     notes: document.getElementById('f-inv-notes').value.trim() || null,
   };
   if (!data.invoice_number) { toast('Invoice number is required'); return; }
@@ -895,6 +928,14 @@ function openProjectModal(id) {
               <label>End Date</label>
               <input type="date" id="fp-end" value="${v('end_date')}">
             </div>
+            <div class="form-group">
+              <label>Default Approver Email</label>
+              <input type="email" id="fp-approver" value="${v('approver_email')}" placeholder="approver@fountayn.com">
+            </div>
+            <div class="form-group">
+              <label>Default Client Email</label>
+              <input type="email" id="fp-client" value="${v('client_email')}" placeholder="client@sponsor.com">
+            </div>
           </div>
 
           <div class="section-title">Upfront Build Pricing</div>
@@ -943,6 +984,8 @@ async function saveProject(id) {
     owner: document.getElementById('fp-owner').value.trim() || null,
     start_date: document.getElementById('fp-start').value || null,
     end_date: document.getElementById('fp-end').value || null,
+    approver_email: document.getElementById('fp-approver').value.trim() || null,
+    client_email: document.getElementById('fp-client').value.trim() || null,
   };
   [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].forEach(svc => {
     data[svc.key] = parseFloat(document.getElementById('fp-'+svc.key)?.value) || 0;
@@ -992,7 +1035,7 @@ function renderReports(c, acts) {
         <input type="text" placeholder="Search…" style="width:200px" value="${repSearch}" oninput="repSearch=this.value;repPage=1;rerenderReports()">
         <select onchange="repStatus=this.value;repPage=1;rerenderReports()">
           <option value="">All Statuses</option>
-          ${['draft','sent','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${repStatus===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+          ${['draft','sent','pending_approval','approved','rejected','paid','overdue','cancelled'].map(s=>`<option value="${s}" ${repStatus===s?'selected':''}>${statusBadge(s).replace(/<[^>]+>/g,'')}</option>`).join('')}
         </select>
         <select onchange="repProject=this.value;repPage=1;rerenderReports()">
           <option value="">All Projects</option>
@@ -1093,6 +1136,166 @@ function exportInvoicesPDF() {
 }
 function exportReportsPDF() {
   const w = window.open('','_blank'); w.document.write(buildPrintTable(filterReports(),'Invoice Report')); w.document.close(); w.print();
+}
+
+// ── APPROVAL WORKFLOW ─────────────────────────────────────────────────────────
+async function submitForApproval(id) {
+  const inv = invoices.find(i => i.id === id);
+  if (!inv) return;
+  if (!inv.approver_email) {
+    toast('Add an approver email to this invoice first (Edit → Approver Email)');
+    return;
+  }
+  const approvalToken = genToken();
+  const rejectionToken = genToken();
+  const {error} = await sb.from('inv_invoices').update({
+    status: 'pending_approval',
+    approval_token: approvalToken,
+    rejection_token: rejectionToken,
+  }).eq('id', id);
+  if (error) { toast('Error: ' + error.message); return; }
+
+  const proj = projects.find(p => p.id === inv.project_id);
+  const approveUrl = `${APP_URL}?approve=${approvalToken}`;
+  const rejectUrl  = `${APP_URL}?reject=${rejectionToken}`;
+
+  try {
+    await emailjs.send(EJS_SERVICE, EJS_APPROVAL_TEMPLATE, {
+      to_email:       inv.approver_email,
+      subject:        `Invoice ${inv.invoice_number} requires your approval`,
+      invoice_number: inv.invoice_number,
+      project_name:   proj?.name || '—',
+      owner:          inv.owner || '—',
+      date_invoiced:  fmtDate(inv.date_invoiced),
+      amount:         fmt(inv.invoice_amount),
+      notes:          inv.notes || '',
+      approve_url:    approveUrl,
+      reject_url:     rejectUrl,
+      html_body:      buildApprovalEmailHtml(inv, proj, approveUrl, rejectUrl),
+    });
+    toast(`Approval request sent to ${inv.approver_email}`);
+  } catch(e) {
+    toast('Invoice updated but email failed — check EmailJS template IDs');
+    console.error(e);
+  }
+  await rerenderInvoices();
+}
+
+async function approveInvoice(id) {
+  const {error} = await sb.from('inv_invoices').update({status:'approved'}).eq('id', id);
+  if (error) { toast('Error: ' + error.message); return; }
+  toast('Invoice approved ✓');
+  await rerenderInvoices();
+}
+
+async function rejectInvoice(id) {
+  const {error} = await sb.from('inv_invoices').update({status:'rejected'}).eq('id', id);
+  if (error) { toast('Error: ' + error.message); return; }
+  toast('Invoice rejected');
+  await rerenderInvoices();
+}
+
+async function sendToClient(id) {
+  await loadAll();
+  const inv = invoices.find(i => i.id === id);
+  if (!inv) return;
+  if (!inv.client_email) {
+    toast('Add a client email to this invoice first (Edit → Client Email)');
+    return;
+  }
+  const proj = projects.find(p => p.id === inv.project_id);
+  const items = lineItems.filter(l => l.invoice_id === id);
+  try {
+    await emailjs.send(EJS_SERVICE, EJS_CLIENT_TEMPLATE, {
+      to_email:       inv.client_email,
+      subject:        `Invoice ${inv.invoice_number} from Fountayn`,
+      invoice_number: inv.invoice_number,
+      project_name:   proj?.name || '—',
+      owner:          inv.owner || '—',
+      date_invoiced:  fmtDate(inv.date_invoiced),
+      amount:         fmt(inv.invoice_amount),
+      notes:          inv.notes || '',
+      html_body:      buildClientEmailHtml(inv, proj, items),
+    });
+    await sb.from('inv_invoices').update({status:'sent'}).eq('id', id);
+    toast(`Invoice sent to ${inv.client_email} ✓`);
+  } catch(e) {
+    toast('Email failed — check EmailJS template IDs');
+    console.error(e);
+  }
+  await rerenderInvoices();
+}
+
+// Handle magic approve/reject links (?approve=TOKEN or ?reject=TOKEN)
+async function handleUrlApproval() {
+  const params = new URLSearchParams(window.location.search);
+  const approveToken = params.get('approve');
+  const rejectToken  = params.get('reject');
+  if (!approveToken && !rejectToken) return;
+
+  // Clear the URL param immediately
+  window.history.replaceState({}, '', window.location.pathname);
+
+  await loadAll();
+  if (approveToken) {
+    const inv = invoices.find(i => i.approval_token === approveToken);
+    if (!inv) { toast('Approval link is invalid or already used'); return; }
+    await sb.from('inv_invoices').update({status:'approved', approval_token: null}).eq('id', inv.id);
+    toast(`✓ Invoice ${inv.invoice_number} approved! It is now ready to send to the client.`, 5000);
+    await rerenderInvoices();
+  } else if (rejectToken) {
+    const inv = invoices.find(i => i.rejection_token === rejectToken);
+    if (!inv) { toast('Rejection link is invalid or already used'); return; }
+    await sb.from('inv_invoices').update({status:'rejected', rejection_token: null}).eq('id', inv.id);
+    toast(`Invoice ${inv.invoice_number} has been rejected.`, 5000);
+    await rerenderInvoices();
+  }
+}
+
+// ── EMAIL HTML BUILDERS ───────────────────────────────────────────────────────
+function buildApprovalEmailHtml(inv, proj, approveUrl, rejectUrl) {
+  return `<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:32px 24px;color:#111827">
+  <div style="margin-bottom:24px"><span style="font-size:1.3rem;font-weight:700;color:#4f46e5">💼 Invoice Hub</span><span style="margin-left:8px;font-size:.85rem;color:#6b7280">Fountayn</span></div>
+  <h2 style="font-size:1.1rem;font-weight:600;margin-bottom:16px">Invoice Approval Required</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:.875rem;margin-bottom:24px">
+    <tr><td style="padding:8px 0;color:#6b7280;width:140px">Invoice #</td><td style="padding:8px 0;font-weight:600">${inv.invoice_number}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Project</td><td style="padding:8px 0">${proj?.name||'—'}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Owner</td><td style="padding:8px 0">${inv.owner||'—'}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Date</td><td style="padding:8px 0">${fmtDate(inv.date_invoiced)}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Amount</td><td style="padding:8px 0;font-size:1.2rem;font-weight:700;color:#4f46e5">${fmt(inv.invoice_amount)}</td></tr>
+    ${inv.notes?`<tr><td style="padding:8px 0;color:#6b7280">Notes</td><td style="padding:8px 0">${inv.notes}</td></tr>`:''}
+  </table>
+  <div style="display:flex;gap:12px;margin-bottom:32px">
+    <a href="${approveUrl}" style="display:inline-block;background:#10b981;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">✓ Approve Invoice</a>
+    <a href="${rejectUrl}" style="display:inline-block;background:#ef4444;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">✕ Reject Invoice</a>
+  </div>
+  <p style="font-size:.8rem;color:#9ca3af">This request was sent from Invoice Hub. Clicking Approve or Reject will update the invoice status automatically.</p>
+</div>`;
+}
+
+function buildClientEmailHtml(inv, proj, items) {
+  const upfront = items.filter(l => l.service_type==='upfront');
+  const monthly  = items.filter(l => l.service_type==='monthly');
+  const lineItemsHtml = items.length > 0 ? `
+  <table style="width:100%;border-collapse:collapse;font-size:.875rem;margin-bottom:24px">
+    <thead><tr style="background:#f3f4f6"><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Service</th><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Type</th><th style="padding:8px 12px;text-align:right;color:#6b7280;font-size:.75rem;text-transform:uppercase">Amount</th></tr></thead>
+    <tbody>
+      ${upfront.length?`<tr><td colspan="3" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Upfront Build</td></tr>${upfront.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">One-time</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+      ${monthly.length?`<tr><td colspan="3" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Monthly Recurring</td></tr>${monthly.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">Monthly</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+      <tr style="background:#eef2ff"><td colspan="2" style="padding:10px 12px;font-weight:700">Total</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#4f46e5">${fmt(inv.invoice_amount)}</td></tr>
+    </tbody>
+  </table>` : `<p style="font-size:1.5rem;font-weight:700;color:#4f46e5;margin-bottom:24px">${fmt(inv.invoice_amount)}</p>`;
+
+  return `<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:32px 24px;color:#111827">
+  <div style="margin-bottom:24px"><span style="font-size:1.3rem;font-weight:700;color:#4f46e5">💼 Invoice Hub</span><span style="margin-left:8px;font-size:.85rem;color:#6b7280">Fountayn</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px">
+    <div><h1 style="font-size:2rem;color:#4f46e5;margin:0 0 4px">INVOICE</h1><div style="font-weight:600">${inv.invoice_number}</div></div>
+    <div style="text-align:right;font-size:.875rem;color:#6b7280"><div>Project: <strong style="color:#111">${proj?.name||'—'}</strong></div><div>Date: ${fmtDate(inv.date_invoiced)}</div></div>
+  </div>
+  ${lineItemsHtml}
+  ${inv.notes?`<div style="background:#f9fafb;border-radius:8px;padding:12px 16px;font-size:.875rem;margin-bottom:24px"><strong>Notes:</strong> ${inv.notes}</div>`:''}
+  <p style="font-size:.8rem;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:16px">This invoice was sent via Invoice Hub · Fountayn · ${new Date().toLocaleDateString()}</p>
+</div>`;
 }
 
 // ── HELP ──────────────────────────────────────────────────────────────────────
@@ -1204,7 +1407,9 @@ document.addEventListener('click', e => {
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-renderView();
+const _p = new URLSearchParams(window.location.search);
+if (_p.get('approve') || _p.get('reject')) currentView = 'invoices';
+renderView().then(() => handleUrlApproval());
 </script>
 </body>
 </html>
