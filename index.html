@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --primary: #4f46e5;
@@ -206,20 +207,19 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const sb = supabase.createClient(SB_URL, SB_KEY);
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────────
+const EJS_SERVICE  = 'service_5jlgxlf';
+const EJS_PUBLIC   = '3IVETYVu63K2Ww6sm';
+const EJS_TEMPLATE = 'template_qjok7me';
 const APP_URL = 'https://invoice-hub-umber.vercel.app';
-const SEND_EMAIL_FN = 'https://qlzoyqhsvqtxjvppvymj.supabase.co/functions/v1/send-email';
+emailjs.init(EJS_PUBLIC);
 
 async function sendEmail({to_email, subject, html_body, attachment_name, attachment_data}) {
-  const r = await fetch(SEND_EMAIL_FN, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({to_email, subject, html_body, attachment_name, attachment_data})
-  });
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(text);
+  const params = { to_email, subject, html_body };
+  if (attachment_name && attachment_data) {
+    params.attachment_name = attachment_name;
+    params.attachment_data = attachment_data;
   }
-  return r.json();
+  return emailjs.send(EJS_SERVICE, EJS_TEMPLATE, params);
 }
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
