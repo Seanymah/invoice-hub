@@ -1159,29 +1159,32 @@ async function submitForApproval(id) {
   }
   const approvalToken = genToken();
   const rejectionToken = genToken();
-  const {error} = await sb.from('inv_invoices').update({
-    status: 'pending_approval',
-    approval_token: approvalToken,
-    rejection_token: rejectionToken,
-  }).eq('id', id);
-  if (error) { toast('Error: ' + error.message); return; }
-
   const proj = projects.find(p => p.id === inv.project_id);
   const approveUrl  = `${APP_URL}?approve=${approvalToken}`;
   const rejectUrl   = `${APP_URL}?reject=${rejectionToken}`;
   const invoiceUrl  = `${APP_URL}?view_invoice=${id}`;
 
+  // Send email FIRST — only update status if it succeeds
   try {
     await sendEmail({
       to_email: inv.approver_email,
       subject:  `Invoice ${inv.invoice_number} requires your approval`,
       html_body: buildApprovalEmailHtml(inv, proj, approveUrl, rejectUrl, invoiceUrl),
     });
-    toast(`Approval request sent to ${inv.approver_email}`);
   } catch(e) {
-    toast('Email failed: ' + (e?.message || e));
+    toast('Email failed — invoice status not changed: ' + (e?.message || e));
     console.error(e);
+    return;
   }
+
+  // Email sent successfully — now update status
+  const {error} = await sb.from('inv_invoices').update({
+    status: 'pending_approval',
+    approval_token: approvalToken,
+    rejection_token: rejectionToken,
+  }).eq('id', id);
+  if (error) { toast('Error saving status: ' + error.message); return; }
+  toast(`Approval request sent to ${inv.approver_email} ✓`);
   await rerenderInvoices();
 }
 
