@@ -524,8 +524,12 @@ function openInvoiceModal(id) {
               <input type="date" id="f-inv-date" value="${inv?.date_invoiced||''}">
             </div>
             <div class="form-group">
-              <label>Billing Period</label>
-              <input type="text" id="f-inv-billing-period" value="${inv?.billing_period||''}" placeholder="e.g. May 2026">
+              <label>Billing Period From</label>
+              <input type="date" id="f-inv-bp-start" value="${inv?.billing_period_start||''}">
+            </div>
+            <div class="form-group">
+              <label>Billing Period To</label>
+              <input type="date" id="f-inv-bp-end" value="${inv?.billing_period_end||''}">
             </div>
             <div class="form-group">
               <label>Invoice Amount ($)</label>
@@ -565,7 +569,8 @@ async function saveInvoice(id) {
     owner: document.getElementById('f-inv-owner').value.trim() || null,
     status: document.getElementById('f-inv-status').value,
     date_invoiced: document.getElementById('f-inv-date').value || null,
-    billing_period: document.getElementById('f-inv-billing-period').value.trim() || null,
+    billing_period_start: document.getElementById('f-inv-bp-start').value || null,
+    billing_period_end: document.getElementById('f-inv-bp-end').value || null,
     invoice_amount: parseFloat(document.getElementById('f-inv-amount').value) || 0,
     date_paid: document.getElementById('f-inv-paid').value || null,
     approver_email: document.getElementById('f-inv-approver').value.trim() || null,
@@ -660,8 +665,12 @@ function openGenerateModal() {
                 <input type="date" id="gen-inv-date" value="${new Date().toISOString().split('T')[0]}">
               </div>
               <div class="form-group">
-                <label>Billing Period</label>
-                <input type="text" id="gen-inv-billing-period" placeholder="e.g. May 2026">
+                <label>Billing Period From</label>
+                <input type="date" id="gen-inv-bp-start">
+              </div>
+              <div class="form-group">
+                <label>Billing Period To</label>
+                <input type="date" id="gen-inv-bp-end">
               </div>
               <div class="form-group">
                 <label>Status</label>
@@ -759,7 +768,8 @@ async function saveGeneratedInvoice() {
     project_id: projId,
     owner: document.getElementById('gen-inv-owner').value.trim() || null,
     date_invoiced: document.getElementById('gen-inv-date').value || null,
-    billing_period: document.getElementById('gen-inv-billing-period').value.trim() || null,
+    billing_period_start: document.getElementById('gen-inv-bp-start').value || null,
+    billing_period_end: document.getElementById('gen-inv-bp-end').value || null,
     invoice_amount: total,
     status: document.getElementById('gen-inv-status').value,
     notes: document.getElementById('gen-inv-notes').value.trim() || null,
@@ -1060,6 +1070,7 @@ async function saveProject(id) {
   if (err) { toast('Error: ' + err.message); return; }
   closeModal('proj-modal');
   toast(id ? 'Project updated' : 'Project created');
+  await loadAll();
   await renderView();
 }
 
@@ -1310,7 +1321,7 @@ async function generateInvoicePDFBase64(inv, proj, items) {
   const rows = [
     ['Project', proj?.name||'—', 'Owner', inv.owner||'—'],
     ['Date Invoiced', fmtDate(inv.date_invoiced), 'Status', inv.status||'—'],
-    inv.billing_period ? ['Billing Period', inv.billing_period, '', ''] : null,
+    (inv.billing_period_start||inv.billing_period_end) ? ['Billing Period', `${fmtDate(inv.billing_period_start)||'—'} – ${fmtDate(inv.billing_period_end)||'—'}`, '', ''] : null,
     proj?['Project Start', fmtDate(proj.start_date), 'Project End', fmtDate(proj.end_date)]:null,
   ].filter(Boolean);
 
