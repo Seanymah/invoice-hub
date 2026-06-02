@@ -1592,12 +1592,14 @@ function renderHelp(c) {
       {
         icon:'📁', title:'Projects',
         color:'#eef2ff', border:'#c7d2fe', head:'#312e81',
-        intro:'Projects are the foundation of Invoice Hub. Each project stores all your service pricing so invoices can be generated automatically.',
+        intro:'Projects are the foundation of Invoice Hub. Each project stores all your service pricing and contracted units so invoices can be generated automatically and unit consumption can be tracked over time.',
         steps:[
-          ['Add a project','Click <strong>+ Add Project</strong> in the top-right. Give the project a name, owner, colour (used as a visual tag throughout the app), and start/end dates.'],
+          ['Add a project','Click <strong>+ Add Project</strong> in the top-right. Give the project a name, owner, colour (used as a visual tag throughout the app), start/end dates, and default approver/client email addresses.'],
           ['Set upfront pricing','In the project form, enter the one-time build fees for each service: EDC, RTSM, Custom Build, ePRO, eConsent, Adjudication. Leave a field at $0.00 if that service is not in scope — it will be greyed out in the invoice generator.'],
           ['Set monthly recurring pricing','Enter the monthly recurring fees for EDC/RTSM, eTMF, CTMS, ePRO, eConsent, Adjudication, and Project Management. These appear as selectable line items each time you generate a monthly invoice.'],
-          ['Project card','Each project card shows a summary: total upfront value, monthly rate, number of invoices raised, and total paid to date. Click <em>View pricing breakdown</em> to see the full service-by-service table.'],
+          ['Set contracted units','In the project form, enter the number of contracted units (e.g. months) for each service under <em>Contracted Units per Service</em>. These drive the unit tracking table and total contract value calculation.'],
+          ['Project card — summary stats','Each card shows: <strong>Total Contract Value</strong> (rate × contracted units across all services), <strong>Invoiced to Date</strong> (cumulative across all non-cancelled invoices), <strong>Paid to Date</strong>, and <strong>% Billed</strong> (invoiced ÷ contract value).'],
+          ['Project card — unit tracking','The <em>Unit Tracking &amp; Pricing</em> table auto-opens when units are configured. Columns: <strong>Rate</strong>, <strong>Units</strong> (contracted), <strong>Contract $</strong> (rate × units), <strong>Billed</strong> (cumulative across all invoices), <strong>Remaining</strong> (turns red at zero).'],
         ]
       },
       {
@@ -1608,21 +1610,22 @@ function renderHelp(c) {
           ['Open the generator','From the Invoices view, click <strong>✨ Generate Invoice</strong> in the top-right.'],
           ['Select a project','Click any project card to select it. The radio button highlights your selection and immediately loads that project\'s service prices.'],
           ['Choose services','Two sections appear — <em>Upfront Build</em> and <em>Monthly Recurring</em>. Services priced at $0.00 are automatically disabled. Tick or untick the services you want to include on this invoice. The <strong>Invoice Total</strong> bar updates in real time.'],
-          ['Fill in invoice details','Set the invoice number (auto-generated, but editable), owner, date, and status (Draft or Sent). Add optional notes.'],
-          ['Save & download','Click <strong>Save & Download PDF</strong>. The invoice is saved to the database and your browser\'s print dialog opens immediately — use <em>Save as PDF</em> to download the formatted invoice document.'],
+          ['Fill in invoice details','Set the invoice number (auto-generated, but editable), owner, date, and <strong>Billing Period From / To</strong> dates. New invoices default to <em>Draft</em> status.'],
+          ['Billing period','The billing period (e.g. "Jun 1 – Jun 30") is stored on the invoice and printed on both the PDF attachment and the browser print view.'],
+          ['Save & download','Click <strong>Save &amp; Download PDF</strong>. The invoice is saved to the database and your browser\'s print dialog opens immediately — use <em>Save as PDF</em> to download the formatted invoice document.'],
         ]
       },
       {
         icon:'🧾', title:'Invoices',
         color:'#eff6ff', border:'#bfdbfe', head:'#1e3a5f',
-        intro:'The Invoices view is your master register of every invoice raised, with full filtering and export.',
+        intro:'The Invoices view is your master register of every invoice raised, with full filtering, unit tracking, and export.',
         steps:[
-          ['Adding a manual invoice','Click <strong>+ Add Manual</strong> if you need to log an invoice that wasn\'t generated through the tool (e.g. imported from a legacy system). Fill in the invoice number, project, owner, amount, dates, and status.'],
-          ['Editing an invoice','Click <strong>Edit</strong> on any row to update any field, including marking it as paid and entering the payment date.'],
-          ['Reprinting an invoice','Click the 🖨 icon on any row to reopen the print/PDF dialog for that invoice.'],
-          ['Filtering','Use the search box (searches invoice number, project name, owner, notes), the Status dropdown, the Project dropdown, and the date range pickers to narrow results. The result count updates live. Click <strong>✕ Clear</strong> to reset all filters.'],
-          ['Exporting','<strong>⬇ Excel</strong> exports the current filtered view to an .xlsx file. <strong>⬇ PDF</strong> opens a print-ready table of the filtered results in a new tab.'],
-          ['Statuses','<em>Draft</em> — not yet sent. <em>Sent</em> — issued to the client. <em>Paid</em> — payment received and reconciled. <em>Overdue</em> — past the expected payment window. <em>Cancelled</em> — voided.'],
+          ['Adding a manual invoice','Click <strong>+ Add Manual</strong> if you need to log an invoice that wasn\'t generated through the tool. Fill in the invoice number, project, owner, amount, dates, billing period, and status.'],
+          ['Editing an invoice','Click <strong>Edit</strong> on any row to update any field, including billing period dates, approver/client email, and payment date.'],
+          ['Unit tracking per invoice','Click any invoice row (look for the <strong>▶</strong> chevron) to expand a unit summary panel. It shows: <em>Contracted</em> units on the project, units on <em>This Invoice</em>, <em>Cumulative Billed</em> across all invoices to date, and <em>Remaining</em>. Cumulative turns red if over-contracted.'],
+          ['Approval workflow','New invoices start as <em>Draft</em>. Click <strong>▶ Submit for Approval</strong> to email the approver a link with one-click Approve / Reject buttons. On approval, a <strong>📧 Send to Client</strong> button appears — clicking it generates a PDF and emails it to the client address.'],
+          ['Statuses','<em>Draft</em> — saved, not yet submitted. <em>Pending Approval</em> — awaiting approver. <em>Approved</em> — ready to send. <em>Approved / Sent</em> — emailed to client. <em>Rejected</em> — returned for revision. <em>Paid</em> — payment received. <em>Overdue</em> — past due. <em>Cancelled</em> — voided.'],
+          ['Filtering &amp; exporting','Search by invoice number, project, owner, or notes. Filter by status, project, or date range. <strong>⬇ Excel</strong> and <strong>⬇ PDF</strong> export the current filtered view.'],
         ]
       },
       {
@@ -1662,6 +1665,9 @@ function renderHelp(c) {
     <div style="background:var(--gray-100);border-radius:10px;padding:16px 20px;font-size:.8rem;color:var(--gray-500);line-height:1.6">
       <strong style="color:var(--gray-700)">💡 Tips</strong><br>
       • Invoice numbers are auto-generated in the format <code>INV-YYYYMM-NNN</code> — you can edit them before saving.<br>
+      • New invoices always default to <em>Draft</em> status — they won't move to the approval queue until you explicitly submit them.<br>
+      • Unit tracking on the project card auto-opens when contracted units are configured — set units in the project form under <em>Contracted Units per Service</em>.<br>
+      • The PDF emailed to clients includes a <em>Unit Tracking</em> table at the bottom showing contracted vs. cumulative billed vs. remaining per service.<br>
       • All dates follow MM/DD/YYYY display but are stored as ISO dates — filtering by date range is always accurate.<br>
       • Deleting a project does not delete its invoices — they remain but show no project name.<br>
       • The app connects to a shared Supabase database — changes made by one user are visible to all immediately.
