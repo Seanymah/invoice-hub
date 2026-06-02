@@ -1410,9 +1410,9 @@ async function generateInvoicePDFBase64(inv, proj, items, allProjItems=[]) {
       doc.text(`${svc.label} (${svc.type==='upfront'?'Upfront':'Monthly'})`, margin+2, y+4);
       doc.setTextColor(107,114,128);
       doc.text(contracted > 0 ? String(contracted) : '—', 95, y+4, {align:'right'});
-      doc.setTextColor(contracted > 0 && billed >= contracted ? 239,68,68 : 0);
+      if (contracted > 0 && billed >= contracted) { doc.setTextColor(239,68,68); } else { doc.setTextColor(0); }
       doc.text(String(billed), 135, y+4, {align:'right'});
-      doc.setTextColor(remaining === 0 && contracted > 0 ? 239,68,68 : 16,185,129);
+      if (remaining === 0 && contracted > 0) { doc.setTextColor(239,68,68); } else { doc.setTextColor(16,185,129); }
       doc.text(contracted > 0 ? String(remaining) : '—', W-margin-2, y+4, {align:'right'});
       doc.setDrawColor(229,231,235); doc.line(margin, y+6, W-margin, y+6);
       y += 8;
