@@ -430,16 +430,60 @@ function renderInvoices(c, acts) {
         </tr></thead>
         <tbody id="inv-tbody">
           ${paginated.length===0?`<tr><td colspan="9" class="no-data">No invoices match filters</td></tr>`
-            : paginated.map(i => `<tr data-inv-id="${i.id}">
-              <td><strong>${i.invoice_number||'—'}</strong></td>
-              <td><span class="color-dot" style="background:${projects.find(p=>p.id===i.project_id)?.color||'#ccc'}"></span> ${projectName(i.project_id)}</td>
+            : paginated.map(i => {
+              const proj = projects.find(p=>p.id===i.project_id);
+              const su = proj?.service_units || {};
+              const allSvcs = [...UPFRONT_SERVICES.map(s=>({...s,type:'upfront'})), ...MONTHLY_SERVICES.map(s=>({...s,type:'monthly'}))];
+              // Cumulative billed across all non-cancelled invoices for this project
+              const projInvIds = new Set(invoices.filter(x=>x.project_id===i.project_id&&x.status!=='cancelled').map(x=>x.id));
+              const cumulativeByLabel = {};
+              lineItems.filter(l=>projInvIds.has(l.invoice_id)).forEach(l=>{ cumulativeByLabel[l.service_name]=(cumulativeByLabel[l.service_name]||0)+(l.quantity||1); });
+              // This invoice's units
+              const thisByLabel = {};
+              lineItems.filter(l=>l.invoice_id===i.id).forEach(l=>{ thisByLabel[l.service_name]=(thisByLabel[l.service_name]||0)+(l.quantity||1); });
+              // Only show services with any data
+              const unitRows = allSvcs.filter(svc => (su[svc.key]||0)>0 || (cumulativeByLabel[svc.label]||0)>0);
+              const unitDetail = unitRows.length > 0 ? `
+                <tr id="inv-detail-${i.id}" style="display:none">
+                  <td colspan="9" style="padding:0;background:#f9fafb;border-bottom:2px solid #e0e7ff">
+                    <div style="padding:10px 16px">
+                      <div style="font-size:.72rem;font-weight:700;color:#6366f1;text-transform:uppercase;margin-bottom:6px">Unit Tracking — ${proj?.name||'Project'}</div>
+                      <table style="width:100%;border-collapse:collapse;font-size:.75rem">
+                        <tr style="background:#eef2ff">
+                          <th style="padding:4px 8px;text-align:left;color:#6366f1;font-weight:600">Service</th>
+                          <th style="padding:4px 8px;text-align:right;color:#6366f1;font-weight:600">Contracted</th>
+                          <th style="padding:4px 8px;text-align:right;color:#6366f1;font-weight:600">This Invoice</th>
+                          <th style="padding:4px 8px;text-align:right;color:#6366f1;font-weight:600">Cumulative Billed</th>
+                          <th style="padding:4px 8px;text-align:right;color:#6366f1;font-weight:600">Remaining</th>
+                        </tr>
+                        ${unitRows.map(svc => {
+                          const contracted = su[svc.key]||0;
+                          const thisInv = thisByLabel[svc.label]||0;
+                          const cumulative = cumulativeByLabel[svc.label]||0;
+                          const remaining = contracted > 0 ? Math.max(0, contracted - cumulative) : null;
+                          const overBilled = contracted > 0 && cumulative > contracted;
+                          return `<tr style="border-bottom:1px solid #e5e7eb">
+                            <td style="padding:4px 8px">${svc.label} <small style="color:#9ca3af">${svc.type==='upfront'?'(upfront)':'(/mo)'}</small></td>
+                            <td style="padding:4px 8px;text-align:right">${contracted>0?contracted:'—'}</td>
+                            <td style="padding:4px 8px;text-align:right;font-weight:600">${thisInv>0?thisInv:'—'}</td>
+                            <td style="padding:4px 8px;text-align:right;color:${overBilled?'#ef4444':'inherit'};font-weight:600">${cumulative>0?cumulative:'—'}</td>
+                            <td style="padding:4px 8px;text-align:right;font-weight:600;color:${remaining===null?'#9ca3af':remaining===0?'#ef4444':'#10b981'}">${remaining===null?'—':remaining}</td>
+                          </tr>`;
+                        }).join('')}
+                      </table>
+                    </div>
+                  </td>
+                </tr>` : '';
+              return `<tr data-inv-id="${i.id}" style="cursor:pointer" onclick="toggleInvDetail('${i.id}')">
+              <td><span id="inv-chev-${i.id}" style="display:inline-block;font-size:.65rem;margin-right:4px;transition:transform .15s;color:#9ca3af">${unitRows.length>0?'▶':'·'}</span><strong>${i.invoice_number||'—'}</strong></td>
+              <td><span class="color-dot" style="background:${proj?.color||'#ccc'}"></span> ${projectName(i.project_id)}</td>
               <td>${i.owner||'—'}</td>
               <td>${fmtDate(i.date_invoiced)}</td>
               <td><strong>${fmt(i.invoice_amount)}</strong></td>
               <td>${statusBadge(i.status)}</td>
               <td>${fmtDate(i.date_paid)}</td>
               <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${i.notes||''}">${i.notes||'—'}</td>
-              <td style="white-space:nowrap">
+              <td style="white-space:nowrap" onclick="event.stopPropagation()">
                 ${(i.status==='draft'||i.status==='sent'||i.status==='rejected')?`<button class="btn btn-secondary btn-sm" style="background:#fef3c7;border-color:#f59e0b;color:#92400e" onclick="submitForApproval('${i.id}')">▶ Submit for Approval</button>`:''}
                 ${i.status==='pending_approval'?`<button class="btn btn-success btn-sm" onclick="approveInvoice('${i.id}')">✓ Approve</button><button class="btn btn-danger btn-sm" onclick="rejectInvoice('${i.id}')">✕ Reject</button>`:''}
                 ${i.status==='approved'?`<button class="btn btn-primary btn-sm" onclick="sendToClient('${i.id}')">📧 Send to Client</button>`:''}
@@ -448,7 +492,8 @@ function renderInvoices(c, acts) {
                 <button class="btn btn-secondary btn-sm" onclick="printInvoice('${i.id}')">🖨</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${i.id}')">✕</button>
               </td>
-            </tr>`).join('')}
+            </tr>${unitDetail}`;
+            }).join('')}
         </tbody>
       </table>
       <div class="pagination">
@@ -475,6 +520,15 @@ function filterInvoices() {
 }
 
 function clearInvFilters() { invSearch=''; invStatus=''; invProject=''; invDateFrom=''; invDateTo=''; invPage=1; rerenderInvoices(); }
+
+function toggleInvDetail(id) {
+  const row = document.getElementById('inv-detail-' + id);
+  const chev = document.getElementById('inv-chev-' + id);
+  if (!row) return;
+  const showing = row.style.display !== 'none';
+  row.style.display = showing ? 'none' : 'table-row';
+  if (chev) chev.style.transform = showing ? '' : 'rotate(90deg)';
+}
 
 async function rerenderInvoices() {
   await loadAll();
@@ -665,8 +719,8 @@ function openGenerateModal() {
               <div class="form-group">
                 <label>Status</label>
                 <select id="gen-inv-status">
-                  <option value="draft">Draft</option>
-                  <option value="sent" selected>Sent</option>
+                  <option value="draft" selected>Draft</option>
+                  <option value="sent">Sent</option>
                 </select>
               </div>
               <div class="form-group">
