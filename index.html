@@ -881,8 +881,8 @@ function renderProjects(c, acts) {
           billedByService[li.service_name] = (billedByService[li.service_name]||0) + (li.quantity||1);
         });
         const su = p.service_units || {};
-        const allSvcRows = [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].filter(svc => fmtNum(p[svc.key])>0 || su[svc.label]>0);
-        const hasUnits = allSvcRows.some(svc => (su[svc.label]||0) > 0);
+        const allSvcRows = [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].filter(svc => fmtNum(p[svc.key])>0 || su[svc.key]>0);
+        const hasUnits = allSvcRows.some(svc => (su[svc.key]||0) > 0);
         return `<div class="table-card" style="padding:0;overflow:hidden">
           <div style="height:5px;background:${p.color}"></div>
           <div style="padding:16px">
@@ -926,7 +926,7 @@ function renderProjects(c, acts) {
                   const amt = fmtNum(p[svc.key]);
                   if (amt===0 && !(su[svc.label]>0)) return '';
                   const isMonthly = MONTHLY_SERVICES.some(m=>m.key===svc.key);
-                  const contractedUnits = su[svc.label]||0;
+                  const contractedUnits = su[svc.key]||0;
                   const billed = billedByService[svc.label]||0;
                   const remaining = Math.max(0, contractedUnits - billed);
                   return `<tr>
@@ -998,7 +998,7 @@ function openProjectModal(id) {
           <table class="pricing-table">
             <thead><tr><th>Service</th><th>Amount ($)</th><th>Total Units</th></tr></thead>
             <tbody>
-              ${UPFRONT_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.label]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
+              ${UPFRONT_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.key]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
               <tr><td colspan="2" style="text-align:right;font-weight:700;padding:8px 10px">Total Upfront</td><td style="font-weight:700;padding:8px 10px;color:var(--primary)" id="fp-upfront-total"></td></tr>
             </tbody>
           </table>
@@ -1007,7 +1007,7 @@ function openProjectModal(id) {
           <table class="pricing-table">
             <thead><tr><th>Service</th><th>Amount / month ($)</th><th>Total Units</th></tr></thead>
             <tbody>
-              ${MONTHLY_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.label]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
+              ${MONTHLY_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.key]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
               <tr><td colspan="2" style="text-align:right;font-weight:700;padding:8px 10px">Total Monthly</td><td style="font-weight:700;padding:8px 10px;color:var(--success)" id="fp-monthly-total"></td></tr>
             </tbody>
           </table>
@@ -1048,7 +1048,7 @@ async function saveProject(id) {
   [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].forEach(svc => {
     data[svc.key] = parseFloat(document.getElementById('fp-'+svc.key)?.value) || 0;
     const u = parseFloat(document.getElementById('fp-units-'+svc.key)?.value);
-    if (u > 0) service_units[svc.label] = u;
+    if (u > 0) service_units[svc.key] = u;
   });
   data.service_units = service_units;
   let err;
