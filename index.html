@@ -863,18 +863,36 @@ function renderProjects(c, acts) {
   acts.innerHTML = `<button class="btn btn-primary btn-sm" onclick="openProjectModal()">＋ Add Project</button>`;
 
   c.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px" id="proj-grid">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px" id="proj-grid">
       ${projects.length===0 ? '<div style="color:var(--gray-400);padding:40px;font-size:.875rem">No projects yet. Click "+ Add Project" to start.</div>' : ''}
       ${projects.map(p => {
-        const invCount = invoices.filter(i => i.project_id === p.id).length;
-        const paidAmt = invoices.filter(i => i.project_id===p.id && i.status==='paid').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+        const su = p.service_units || {};
+        const allSvcs = [...UPFRONT_SERVICES.map(s=>({...s,type:'upfront'})), ...MONTHLY_SERVICES.map(s=>({...s,type:'monthly'}))];
+
+        // Contract value = rate × allocated units for each service
+        const totalContractValue = allSvcs.reduce((s,svc) => s + fmtNum(p[svc.key]) * (su[svc.key]||0), 0);
+
+        // Fallback: if no service_units set, use sum of upfront rates (legacy)
         const totalUpfront = UPFRONT_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
         const totalMonthly = MONTHLY_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
-        const su = p.service_units || {};
-        const contractMonthlyValue = MONTHLY_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key])*(su[svc.key]||0),0);
-        const totalContractValue = totalUpfront + contractMonthlyValue;
-        const totalInvoiced = invoices.filter(i=>i.project_id===p.id&&i.status!=='cancelled').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
-        const pctBilled = totalContractValue > 0 ? Math.min(100, (totalInvoiced/totalContractValue*100)).toFixed(1) : null;
+
+        const invCount = invoices.filter(i => i.project_id === p.id).length;
+        const paidAmt = invoices.filter(i=>i.project_id===p.id && i.status==='paid').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+        const totalInvoiced = invoices.filter(i=>i.project_id===p.id && i.status!=='cancelled').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
+        const tcv = totalContractValue > 0 ? totalContractValue : totalUpfront;
+        const pctBilled = tcv > 0 ? Math.min(100,(totalInvoiced/tcv*100)).toFixed(1) : null;
+
+        // Billed units per service label from line items
+        const projInvIds = new Set(invoices.filter(i=>i.project_id===p.id&&i.status!=='cancelled').map(i=>i.id));
+        const billedByLabel = {};
+        lineItems.filter(l=>projInvIds.has(l.invoice_id)).forEach(l=>{
+          billedByLabel[l.service_name] = (billedByLabel[l.service_name]||0) + (l.quantity||1);
+        });
+
+        // Services with rate OR units set
+        const unitRows = allSvcs.filter(svc => fmtNum(p[svc.key]) > 0 || su[svc.key] > 0);
+        const hasUnits = unitRows.some(svc => su[svc.key] > 0);
+
         return `<div class="table-card" style="padding:0;overflow:hidden">
           <div style="height:5px;background:${p.color}"></div>
           <div style="padding:16px">
@@ -888,49 +906,54 @@ function renderProjects(c, acts) {
                 <button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')">✕</button>
               </div>
             </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.78rem;margin-bottom:12px">
               <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">Total Upfront</div>
-                <div style="font-weight:700">${fmt(totalUpfront)}</div>
+                <div style="color:var(--gray-400);margin-bottom:2px">Total Contract Value</div>
+                <div style="font-weight:700;color:var(--primary)">${tcv > 0 ? fmt(tcv) : '—'}</div>
               </div>
               <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">Monthly Recurring</div>
-                <div style="font-weight:700">${fmt(totalMonthly)}/mo</div>
-              </div>
-              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">Invoices</div>
-                <div style="font-weight:700">${invCount}</div>
+                <div style="color:var(--gray-400);margin-bottom:2px">Invoiced to Date</div>
+                <div style="font-weight:700">${fmt(totalInvoiced)}</div>
               </div>
               <div style="background:var(--gray-50);border-radius:6px;padding:8px">
                 <div style="color:var(--gray-400);margin-bottom:2px">Paid to Date</div>
                 <div style="font-weight:700;color:var(--success)">${fmt(paidAmt)}</div>
               </div>
-              ${totalContractValue > 0 ? `
               <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">Total Contract Value</div>
-                <div style="font-weight:700;color:var(--primary)">${fmt(totalContractValue)}</div>
+                <div style="color:var(--gray-400);margin-bottom:2px">% Billed</div>
+                <div style="font-weight:700;color:${pctBilled !== null ? (parseFloat(pctBilled)>=100?'var(--success)':parseFloat(pctBilled)>=75?'#f59e0b':'var(--primary)') : 'var(--gray-400)'}">${pctBilled !== null ? pctBilled+'%' : '—'}</div>
               </div>
-              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">% Billed to Date</div>
-                <div style="font-weight:700;color:${parseFloat(pctBilled)>=100?'var(--success)':parseFloat(pctBilled)>=75?'#f59e0b':'var(--primary)'}">${pctBilled}%</div>
-              </div>` : ''}
             </div>
-            <details style="font-size:.75rem">
-              <summary style="cursor:pointer;color:var(--primary);font-weight:500">View pricing breakdown</summary>
-              <table style="width:100%;margin-top:8px;border-collapse:collapse">
-                <tr style="background:var(--gray-50)"><th style="padding:4px 8px;text-align:left;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Service</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Upfront</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Monthly</th></tr>
-                ${['EDC','RTSM','Custom Build','ePRO','eConsent','Adjudication'].map((name,i) => {
-                  const uk = UPFRONT_SERVICES[i]?.key;
-                  const mk = i < MONTHLY_SERVICES.length ? MONTHLY_SERVICES[i]?.key : null;
-                  const uAmt = uk ? fmtNum(p[uk]) : 0;
-                  const mAmt = mk ? fmtNum(p[mk]) : 0;
-                  if (uAmt===0 && mAmt===0) return '';
-                  return `<tr><td style="padding:4px 8px">${name}</td><td style="padding:4px 8px;text-align:right">${uAmt>0?fmt(uAmt):'—'}</td><td style="padding:4px 8px;text-align:right">${mAmt>0?fmt(mAmt)+'<small>/mo</small>':'—'}</td></tr>`;
+
+            <details style="font-size:.75rem" ${hasUnits ? 'open' : ''}>
+              <summary style="cursor:pointer;color:var(--primary);font-weight:500;margin-bottom:6px">Unit Tracking &amp; Pricing</summary>
+              <table style="width:100%;border-collapse:collapse">
+                <tr style="background:var(--gray-50)">
+                  <th style="padding:4px 6px;text-align:left;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Service</th>
+                  <th style="padding:4px 6px;text-align:right;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Rate</th>
+                  <th style="padding:4px 6px;text-align:right;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Units</th>
+                  <th style="padding:4px 6px;text-align:right;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Contract $</th>
+                  <th style="padding:4px 6px;text-align:right;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Billed</th>
+                  <th style="padding:4px 6px;text-align:right;color:var(--gray-500);font-size:.65rem;text-transform:uppercase">Remaining</th>
+                </tr>
+                ${unitRows.map(svc => {
+                  const rate = fmtNum(p[svc.key]);
+                  const units = su[svc.key] || 0;
+                  const contractVal = rate * units;
+                  const billed = billedByLabel[svc.label] || 0;
+                  const remaining = Math.max(0, units - billed);
+                  const overBilled = units > 0 && billed > units;
+                  return `<tr>
+                    <td style="padding:3px 6px">${svc.label}<small style="color:var(--gray-400);margin-left:3px">${svc.type==='upfront'?'(up)':'(/mo)'}</small></td>
+                    <td style="padding:3px 6px;text-align:right">${rate > 0 ? fmt(rate) : '—'}</td>
+                    <td style="padding:3px 6px;text-align:right;font-weight:600">${units > 0 ? units : '—'}</td>
+                    <td style="padding:3px 6px;text-align:right">${contractVal > 0 ? fmt(contractVal) : '—'}</td>
+                    <td style="padding:3px 6px;text-align:right;color:${overBilled?'#ef4444':'inherit'}">${billed > 0 ? billed : '—'}</td>
+                    <td style="padding:3px 6px;text-align:right;color:${units>0?(remaining===0?'#ef4444':'#10b981'):'var(--gray-400)'}">${units > 0 ? remaining : '—'}</td>
+                  </tr>`;
                 }).join('')}
-                ${MONTHLY_SERVICES.filter(svc=>!['edc_rtsm_monthly','epro_monthly','econsent_monthly','adjudication_monthly'].includes(svc.key)).map(svc=>{
-                  const amt=fmtNum(p[svc.key]);
-                  return amt>0?`<tr><td style="padding:4px 8px">${svc.label}</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">${fmt(amt)}<small>/mo</small></td></tr>`:'';
-                }).join('')}
+                ${unitRows.length === 0 ? '<tr><td colspan="6" style="padding:6px;color:var(--gray-400);text-align:center">No rates or units configured</td></tr>' : ''}
               </table>
             </details>
           </div>
