@@ -874,9 +874,15 @@ function renderProjects(c, acts) {
         const paidAmt = invoices.filter(i => i.project_id===p.id && i.status==='paid').reduce((s,i)=>s+fmtNum(i.invoice_amount),0);
         const totalUpfront = UPFRONT_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
         const totalMonthly = MONTHLY_SERVICES.reduce((s,svc)=>s+fmtNum(p[svc.key]),0);
-        const totalUnits = fmtNum(p.total_units);
-        const billedUnits = invoices.filter(i => i.project_id===p.id && i.status!=='cancelled').length;
-        const remainingUnits = Math.max(0, totalUnits - billedUnits);
+        // Per-service billed units: sum quantity from line items on non-cancelled invoices for this project
+        const projInvIds = new Set(invoices.filter(i => i.project_id===p.id && i.status!=='cancelled').map(i=>i.id));
+        const billedByService = {};
+        lineItems.filter(li => projInvIds.has(li.invoice_id)).forEach(li => {
+          billedByService[li.service_name] = (billedByService[li.service_name]||0) + (li.quantity||1);
+        });
+        const su = p.service_units || {};
+        const allSvcRows = [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].filter(svc => fmtNum(p[svc.key])>0 || su[svc.label]>0);
+        const hasUnits = allSvcRows.some(svc => (su[svc.label]||0) > 0);
         return `<div class="table-card" style="padding:0;overflow:hidden">
           <div style="height:5px;background:${p.color}"></div>
           <div style="padding:16px">
@@ -907,31 +913,30 @@ function renderProjects(c, acts) {
                 <div style="color:var(--gray-400);margin-bottom:2px">Paid to Date</div>
                 <div style="font-weight:700;color:var(--success)">${fmt(paidAmt)}</div>
               </div>
-              ${totalUnits > 0 ? `
-              <div style="background:var(--gray-50);border-radius:6px;padding:8px">
-                <div style="color:var(--gray-400);margin-bottom:2px">Total Units</div>
-                <div style="font-weight:700">${totalUnits}</div>
-              </div>
-              <div style="background:var(--gray-50);border-radius:6px;padding:8px;grid-column:span 1">
-                <div style="color:var(--gray-400);margin-bottom:2px">Billed / Remaining</div>
-                <div style="font-weight:700">${billedUnits} <span style="color:var(--gray-400);font-weight:400">/</span> <span style="color:${remainingUnits===0?'var(--danger)':'var(--success)'}">${remainingUnits}</span></div>
-              </div>` : ''}
             </div>
-            <details style="font-size:.75rem">
-              <summary style="cursor:pointer;color:var(--primary);font-weight:500">View pricing breakdown</summary>
+            <details style="font-size:.75rem" ${hasUnits?'open':''}>
+              <summary style="cursor:pointer;color:var(--primary);font-weight:500">${hasUnits?'Unit Tracking &amp; Pricing':'View pricing breakdown'}</summary>
               <table style="width:100%;margin-top:8px;border-collapse:collapse">
-                <tr style="background:var(--gray-50)"><th style="padding:4px 8px;text-align:left;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Service</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Upfront</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Monthly</th></tr>
-                ${['EDC','RTSM','Custom Build','ePRO','eConsent','Adjudication'].map((name,i) => {
-                  const uk = UPFRONT_SERVICES[i]?.key;
-                  const mk = i < MONTHLY_SERVICES.length ? MONTHLY_SERVICES[i]?.key : null;
-                  const uAmt = uk ? fmtNum(p[uk]) : 0;
-                  const mAmt = mk ? fmtNum(p[mk]) : 0;
-                  if (uAmt===0 && mAmt===0) return '';
-                  return `<tr><td style="padding:4px 8px">${name}</td><td style="padding:4px 8px;text-align:right">${uAmt>0?fmt(uAmt):'—'}</td><td style="padding:4px 8px;text-align:right">${mAmt>0?fmt(mAmt)+'<small>/mo</small>':'—'}</td></tr>`;
-                }).join('')}
-                ${MONTHLY_SERVICES.filter(svc=>!['edc_rtsm_monthly','epro_monthly','econsent_monthly','adjudication_monthly'].includes(svc.key)).map(svc=>{
-                  const amt=fmtNum(p[svc.key]);
-                  return amt>0?`<tr><td style="padding:4px 8px">${svc.label}</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">${fmt(amt)}<small>/mo</small></td></tr>`:'';
+                <tr style="background:var(--gray-50)">
+                  <th style="padding:4px 8px;text-align:left;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Service</th>
+                  <th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Rate</th>
+                  ${hasUnits?`<th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Total</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Billed</th><th style="padding:4px 8px;text-align:right;color:var(--gray-500);font-size:.68rem;text-transform:uppercase">Remaining</th>`:''}
+                </tr>
+                ${allSvcRows.map(svc => {
+                  const amt = fmtNum(p[svc.key]);
+                  if (amt===0 && !(su[svc.label]>0)) return '';
+                  const isMonthly = MONTHLY_SERVICES.some(m=>m.key===svc.key);
+                  const contractedUnits = su[svc.label]||0;
+                  const billed = billedByService[svc.label]||0;
+                  const remaining = Math.max(0, contractedUnits - billed);
+                  return `<tr>
+                    <td style="padding:4px 8px">${svc.label}</td>
+                    <td style="padding:4px 8px;text-align:right">${amt>0?fmt(amt)+(isMonthly?'<small>/unit</small>':''):'—'}</td>
+                    ${hasUnits?`
+                    <td style="padding:4px 8px;text-align:right">${contractedUnits>0?contractedUnits:'—'}</td>
+                    <td style="padding:4px 8px;text-align:right">${billed>0?`<span style="color:var(--primary);font-weight:600">${billed}</span>`:'0'}</td>
+                    <td style="padding:4px 8px;text-align:right"><span style="color:${remaining===0&&contractedUnits>0?'var(--danger)':'var(--success)'};font-weight:600">${contractedUnits>0?remaining:'—'}</span></td>`:''}
+                  </tr>`;
                 }).join('')}
               </table>
             </details>
@@ -991,19 +996,19 @@ function openProjectModal(id) {
 
           <div class="section-title">Upfront Build Pricing</div>
           <table class="pricing-table">
-            <thead><tr><th>Service</th><th>Amount ($)</th></tr></thead>
+            <thead><tr><th>Service</th><th>Amount ($)</th><th>Total Units</th></tr></thead>
             <tbody>
-              ${UPFRONT_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td></tr>`).join('')}
-              <tr><td colspan="1" style="text-align:right;font-weight:700;padding:8px 10px">Total Upfront</td><td style="font-weight:700;padding:8px 10px;color:var(--primary)" id="fp-upfront-total"></td></tr>
+              ${UPFRONT_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.label]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
+              <tr><td colspan="2" style="text-align:right;font-weight:700;padding:8px 10px">Total Upfront</td><td style="font-weight:700;padding:8px 10px;color:var(--primary)" id="fp-upfront-total"></td></tr>
             </tbody>
           </table>
 
           <div class="section-title">Monthly Recurring Pricing</div>
           <table class="pricing-table">
-            <thead><tr><th>Service</th><th>Amount / month ($)</th></tr></thead>
+            <thead><tr><th>Service</th><th>Amount / month ($)</th><th>Total Units</th></tr></thead>
             <tbody>
-              ${MONTHLY_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td></tr>`).join('')}
-              <tr><td colspan="1" style="text-align:right;font-weight:700;padding:8px 10px">Total Monthly</td><td style="font-weight:700;padding:8px 10px;color:var(--success)" id="fp-monthly-total"></td></tr>
+              ${MONTHLY_SERVICES.map(svc => `<tr><td>${svc.label}</td><td><input type="number" id="fp-${svc.key}" min="0" step="0.01" value="${v(svc.key, 0)}" placeholder="0.00" oninput="updateProjectTotal()"></td><td><input type="number" id="fp-units-${svc.key}" min="0" step="1" value="${(p?.service_units||{})[svc.label]||''}" placeholder="—" style="width:70px"></td></tr>`).join('')}
+              <tr><td colspan="2" style="text-align:right;font-weight:700;padding:8px 10px">Total Monthly</td><td style="font-weight:700;padding:8px 10px;color:var(--success)" id="fp-monthly-total"></td></tr>
             </tbody>
           </table>
         </div>
@@ -1039,9 +1044,13 @@ async function saveProject(id) {
     client_email: document.getElementById('fp-client').value.trim() || null,
     total_units: parseFloat(document.getElementById('fp-total-units').value) || 0,
   };
+  const service_units = {};
   [...UPFRONT_SERVICES, ...MONTHLY_SERVICES].forEach(svc => {
     data[svc.key] = parseFloat(document.getElementById('fp-'+svc.key)?.value) || 0;
+    const u = parseFloat(document.getElementById('fp-units-'+svc.key)?.value);
+    if (u > 0) service_units[svc.label] = u;
   });
+  data.service_units = service_units;
   let err;
   if (id) {
     ({error:err} = await sb.from('inv_projects').update(data).eq('id',id));
