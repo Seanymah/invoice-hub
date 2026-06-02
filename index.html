@@ -143,10 +143,12 @@
   .gen-project-card .proj-meta { font-size: 0.75rem; color: var(--gray-500); }
 
   .service-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .service-check { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--gray-200); border-radius: 7px; padding: 8px 12px; font-size: 0.82rem; }
+  .service-check { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--gray-200); border-radius: 7px; padding: 8px 12px; font-size: 0.82rem; gap: 8px; }
   .service-check label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
   .service-check input[type=checkbox] { accent-color: var(--primary); width: 15px; height: 15px; }
-  .service-check .svc-amount { font-weight: 600; color: var(--gray-700); white-space: nowrap; }
+  .service-check .svc-amount { font-weight: 600; color: var(--gray-700); white-space: nowrap; min-width: 64px; text-align: right; }
+  .service-check .svc-qty-wrap { display: flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--gray-500); font-size: .78rem; }
+  .service-check .svc-qty { width: 48px; padding: 2px 4px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: .82rem; text-align: center; }
   .invoice-total-bar { background: var(--primary-light); border: 1px solid #c7d2fe; border-radius: 8px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
   .invoice-total-bar .total-label { font-size: 0.875rem; color: var(--primary); font-weight: 600; }
   .invoice-total-bar .total-amount { font-size: 1.4rem; font-weight: 700; color: var(--primary); }
@@ -700,16 +702,18 @@ function selectGenProject(id) {
   upfront.innerHTML = UPFRONT_SERVICES.map(svc => {
     const amt = fmtNum(p[svc.key]);
     return `<div class="service-check">
-      <label><input type="checkbox" class="gen-svc-chk" data-amount="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
-      <span class="svc-amount">${fmt(amt)}</span>
+      <label><input type="checkbox" class="gen-svc-chk" data-unit-price="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
+      <span class="svc-qty-wrap">× <input type="number" class="svc-qty" value="1" min="1" step="1" ${amt===0?'disabled':''} oninput="updateGenTotal()"> units</span>
+      <span class="svc-amount" id="svc-amt-${svc.key}">${fmt(amt)}</span>
     </div>`;
   }).join('');
 
   monthly.innerHTML = MONTHLY_SERVICES.map(svc => {
     const amt = fmtNum(p[svc.key]);
     return `<div class="service-check">
-      <label><input type="checkbox" class="gen-svc-chk" data-amount="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
-      <span class="svc-amount">${fmt(amt)}</span>
+      <label><input type="checkbox" class="gen-svc-chk" data-unit-price="${amt}" onchange="updateGenTotal()" ${amt>0?'checked':'disabled'}> ${svc.label}</label>
+      <span class="svc-qty-wrap">× <input type="number" class="svc-qty" value="1" min="1" step="1" ${amt===0?'disabled':''} oninput="updateGenTotal()"> units</span>
+      <span class="svc-amount" id="svc-amt-${svc.key}">${fmt(amt)}</span>
     </div>`;
   }).join('');
 
@@ -720,7 +724,16 @@ function selectGenProject(id) {
 }
 
 function updateGenTotal() {
-  const total = [...document.querySelectorAll('.gen-svc-chk:checked')].reduce((s, el) => s + parseFloat(el.dataset.amount||0), 0);
+  let total = 0;
+  document.querySelectorAll('.gen-svc-chk').forEach(el => {
+    const wrap = el.closest('.service-check');
+    const qty = parseFloat(wrap.querySelector('.svc-qty')?.value || 1);
+    const unitPrice = parseFloat(el.dataset.unitPrice || 0);
+    const lineTotal = el.checked ? unitPrice * qty : 0;
+    const amtSpan = wrap.querySelector('.svc-amount');
+    if (amtSpan) amtSpan.textContent = fmt(el.checked ? unitPrice * qty : unitPrice);
+    total += lineTotal;
+  });
   document.getElementById('gen-total').textContent = fmt(total);
 }
 
@@ -735,7 +748,9 @@ async function saveGeneratedInvoice() {
   [...document.querySelectorAll('.gen-svc-chk:checked')].forEach((el, idx) => {
     const parent = el.closest('.service-check');
     const label = parent.querySelector('label').textContent.trim();
-    selectedSvcs.push({ service_name: label, service_type: el.closest('#gen-monthly-checks') ? 'monthly' : 'upfront', amount: parseFloat(el.dataset.amount) });
+    const unitPrice = parseFloat(el.dataset.unitPrice || 0);
+    const qty = parseFloat(parent.querySelector('.svc-qty')?.value || 1);
+    selectedSvcs.push({ service_name: label, service_type: el.closest('#gen-monthly-checks') ? 'monthly' : 'upfront', amount: unitPrice * qty, quantity: qty });
   });
 
   const total = selectedSvcs.reduce((s,x) => s + x.amount, 0);
@@ -824,13 +839,13 @@ function printInvoice(invoiceId) {
     <div class="pdf-section">
       <h4>Line Items</h4>
       <table class="pdf-tbl">
-        <thead><tr><th>Service</th><th>Type</th><th style="text-align:right">Amount</th></tr></thead>
+        <thead><tr><th>Service</th><th>Type</th><th style="text-align:right">Units</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
-          ${upfrontItems.length>0?`<tr><td colspan="3" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Upfront Build</td></tr>
-          ${upfrontItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Upfront</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
-          ${monthlyItems.length>0?`<tr><td colspan="3" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Monthly Recurring</td></tr>
-          ${monthlyItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Monthly</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
-          <tr class="pdf-total-row"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totalAmt)}</td></tr>
+          ${upfrontItems.length>0?`<tr><td colspan="4" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Upfront Build</td></tr>
+          ${upfrontItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Upfront</td><td style="text-align:right;color:#6b7280">${l.quantity??1}</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+          ${monthlyItems.length>0?`<tr><td colspan="4" style="font-weight:600;font-size:.78rem;color:#6b7280;padding:10px 12px 4px;background:#f9fafb">Monthly Recurring</td></tr>
+          ${monthlyItems.map(l=>`<tr><td>${l.service_name}</td><td style="color:#6b7280">Monthly</td><td style="text-align:right;color:#6b7280">${l.quantity??1}</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+          <tr class="pdf-total-row"><td colspan="3">TOTAL</td><td style="text-align:right">${fmt(totalAmt)}</td></tr>
         </tbody>
       </table>
     </div>` : `
@@ -1304,7 +1319,8 @@ async function generateInvoicePDFBase64(inv, proj, items) {
     doc.setFillColor(238,242,255); doc.rect(margin, y, W-margin*2, 8, 'F');
     doc.setFontSize(8); doc.setTextColor(79,70,229); doc.setFont(undefined,'bold');
     doc.text('SERVICE', margin+2, y+5);
-    doc.text('TYPE', 120, y+5);
+    doc.text('TYPE', 105, y+5);
+    doc.text('UNITS', 148, y+5, {align:'right'});
     doc.text('AMOUNT', W-margin-2, y+5, {align:'right'});
     y += 10; doc.setFont(undefined,'normal');
 
@@ -1321,7 +1337,8 @@ async function generateInvoicePDFBase64(inv, proj, items) {
         doc.setFontSize(9); doc.setTextColor(0);
         doc.text(item.service_name, margin+2, y+4);
         doc.setTextColor(107,114,128);
-        doc.text(item.service_type==='upfront'?'One-time':'Monthly', 120, y+4);
+        doc.text(item.service_type==='upfront'?'One-time':'Monthly', 105, y+4);
+        doc.text(String(item.quantity??1), 148, y+4, {align:'right'});
         doc.setTextColor(0);
         doc.text(fmt(item.amount), W-margin-2, y+4, {align:'right'});
         doc.setDrawColor(229,231,235); doc.line(margin, y+6, W-margin, y+6);
@@ -1416,11 +1433,11 @@ function buildClientEmailHtml(inv, proj, items) {
   const monthly  = items.filter(l => l.service_type==='monthly');
   const lineItemsHtml = items.length > 0 ? `
   <table style="width:100%;border-collapse:collapse;font-size:.875rem;margin-bottom:24px">
-    <thead><tr style="background:#f3f4f6"><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Service</th><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Type</th><th style="padding:8px 12px;text-align:right;color:#6b7280;font-size:.75rem;text-transform:uppercase">Amount</th></tr></thead>
+    <thead><tr style="background:#f3f4f6"><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Service</th><th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:.75rem;text-transform:uppercase">Type</th><th style="padding:8px 12px;text-align:right;color:#6b7280;font-size:.75rem;text-transform:uppercase">Units</th><th style="padding:8px 12px;text-align:right;color:#6b7280;font-size:.75rem;text-transform:uppercase">Amount</th></tr></thead>
     <tbody>
-      ${upfront.length?`<tr><td colspan="3" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Upfront Build</td></tr>${upfront.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">One-time</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
-      ${monthly.length?`<tr><td colspan="3" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Monthly Recurring</td></tr>${monthly.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">Monthly</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
-      <tr style="background:#eef2ff"><td colspan="2" style="padding:10px 12px;font-weight:700">Total</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#4f46e5">${fmt(inv.invoice_amount)}</td></tr>
+      ${upfront.length?`<tr><td colspan="4" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Upfront Build</td></tr>${upfront.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">One-time</td><td style="padding:7px 12px;text-align:right;color:#6b7280">${l.quantity??1}</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+      ${monthly.length?`<tr><td colspan="4" style="padding:6px 12px;font-weight:600;font-size:.78rem;color:#6b7280;background:#f9fafb">Monthly Recurring</td></tr>${monthly.map(l=>`<tr><td style="padding:7px 12px">${l.service_name}</td><td style="padding:7px 12px;color:#6b7280">Monthly</td><td style="padding:7px 12px;text-align:right;color:#6b7280">${l.quantity??1}</td><td style="padding:7px 12px;text-align:right">${fmt(l.amount)}</td></tr>`).join('')}`:''}
+      <tr style="background:#eef2ff"><td colspan="3" style="padding:10px 12px;font-weight:700">Total</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#4f46e5">${fmt(inv.invoice_amount)}</td></tr>
     </tbody>
   </table>` : `<p style="font-size:1.5rem;font-weight:700;color:#4f46e5;margin-bottom:24px">${fmt(inv.invoice_amount)}</p>`;
 
